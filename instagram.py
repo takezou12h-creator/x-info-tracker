@@ -63,9 +63,25 @@ def scrape_instagram_to_sheets():
     # --- 3. スクレイピング ---
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
+        # Cookieの組み立て
+        session_id = os.environ.get("INSTAGRAM_SESSION_ID")
+        
         context = browser.new_context(
             user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         )
+        
+        # 💡 GitHub上のブラウザにログイン状態を注入する
+        if session_id:
+            context.add_cookies([{
+                'name': 'sessionid',
+                'value': session_id,
+                'domain': '.instagram.com',
+                'path': '/',
+                'secure': True,
+                'httpOnly': True
+            }])
+            print("🔑 ログインセッションをブラウザに注入しました。")
+       
         page = context.new_page()
 
         for username in usernames:
