@@ -17,7 +17,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-code-version: '3.10'
+          python-version: '3.10'
 
       - name: Install dependencies
         run: |
@@ -29,4 +29,6 @@ jobs:
         env:
           GCP_JSON_KEY: ${{ secrets.GCP_JSON_KEY }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+          # 💡 ここでGitHub Secretsの値をプログラムの環境変数に橋渡しします
+          INSTAGRAM_SESSION_ID: ${{ secrets.INSTAGRAM_SESSION_ID }}
         run: python instagram.py
