@@ -1,0 +1,32 @@
+name: Daily Instagram Scraper
+
+on:
+  #schedule:
+    # 毎日20:30 UTC（日本時間の翌朝5:30）に自動実行
+    #- cron: '30 20 * * *'
+  workflow_dispatch: # 手動実行ボタン
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-code-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install gspread google-auth playwright
+          playwright install chromium
+
+      - name: Run Instagram scraper
+        env:
+          GCP_JSON_KEY: ${{ secrets.GCP_JSON_KEY }}
+          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+        run: python instagram.py
