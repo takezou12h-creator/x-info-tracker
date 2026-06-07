@@ -45,7 +45,7 @@ def scrape_to_sheets():
         usernames = [line.strip() for line in f if line.strip()]
     
     print(f"📋 読み込んだアカウント数: {len(usernames)} 件")
-    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now_str = datetime.datetime.now().strftime("%Y-%m-%d")
     
     # --- 3. Xのスクレイピング（生ソース直接解剖版） ---
     print("Step 2: Playwright を起動します...")
