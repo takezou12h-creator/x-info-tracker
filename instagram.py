@@ -8,32 +8,30 @@ import gspread
 from google.oauth2.service_account import Credentials
 from playwright.sync_api import sync_playwright
 
-def extract_instagram_counts(html):
-    """Instagramの生HTMLから、フォロワー数、フォロー数、投稿数を1桁単位で抽出する関数"""
+def extract_instagram_counts_from_embed(html):
+    """Instagramの埋め込み用HTMLから、フォロワー数を1桁単位で抽出する関数"""
     counts = {"followers": 0, "following": 0, "posts": 0}
     try:
-        # 1. フォロワー数の抽出
-        followers_match = re.search(r'"edge_followed_by"\s*:\s*\{\s*"count"\s*:\s*(\d+)', html)
-        if followers_match:
-            counts["followers"] = int(followers_match.group(1))
+        # 埋め込み用データの中にあるフォロワー数を検索
+        # 例: "edge_followed_by":{"count":134257} や "user":{..."followers_count":134257} などのパターンに対応
+        match = re.search(r'"followers_count"\s*:\s*(\d+)', html)
+        if not match:
+            match = re.search(r'"edge_followed_by"\s*:\s*\{\s*"count"\s*:\s*(\d+)', html)
             
-        # 2. フォロー中の抽出
-        following_match = re.search(r'"edge_follow"\s*:\s*\{\s*"count"\s*:\s*(\d+)', html)
-        if following_match:
-            counts["following"] = int(following_match.group(1))
+        if match:
+            counts["followers"] = int(match.group(1))
             
-        # 3. 投稿数の抽出
-        posts_match = re.search(r'"edge_owner_to_timeline_media"\s*:\s*\{\s*"count"\s*:\s*(\d+)', html)
-        if posts_match:
-            counts["posts"] = int(posts_match.group(1))
+        # 埋め込みデータにはフォロー中や投稿数が含まれない場合があるため、見つかった場合のみ入れる
+        match_following = re.search(r'"friends_count"\s*:\s*(\d+)', html)
+        if match_following:
+            counts["following"] = int(match_following.group(1))
             
     except Exception as e:
-        print(f" ⚠️ InstagramのHTML解析に失敗: {e}")
-        
+        print(f" ⚠️ HTML解析失敗: {e}")
     return counts
 
 def scrape_instagram_to_sheets():
-    print("🚀 Instagram収集プログラムを開始しました")
+    print("🚀 Instagram収集プログラム（埋め込みルート版）を開始しました")
     
     # --- 1. Google Sheets APIの認証 ---
     try:
@@ -45,15 +43,13 @@ def scrape_instagram_to_sheets():
         
         sheet_id = os.environ.get("SPREADSHEET_ID")
         sh = client.open_by_key(sheet_id)
-        
-        # 【重要】インデックス「1」を指定することで、2枚目のシートを取得します
-        ws = sh.get_worksheet(1) 
+        ws = sh.get_worksheet(1) # 2枚目のシート
         print(f"🎯 スプレッドシート接続成功: {sh.title} / シート名: {ws.title}")
     except Exception as e:
         print(f"❌ Google Sheets 接続エラー: {e}")
         return
 
-    # --- 2. ターゲット（Instagram専用CSV）の読み込み ---
+    # --- 2. ターゲットの読み込み ---
     input_csv = "targets_instagram.csv"
     if not os.path.exists(input_csv):
         print(f"❌ エラー: {input_csv} が見つかりません。")
@@ -64,8 +60,7 @@ def scrape_instagram_to_sheets():
     print(f"📋 読み込んだInstagramアカウント数: {len(usernames)} 件")
     now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
-    # --- 3. Playwrightブラウザの起動とスクレイピング ---
-    print("⏳ Playwright を起動中...")
+    # --- 3. スクレイピング ---
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(
@@ -74,38 +69,59 @@ def scrape_instagram_to_sheets():
         page = context.new_page()
 
         for username in usernames:
-            # URL形式で書かれていてもユーザー名だけを純粋に抽出する整形処理
             clean_username = username.replace("https://www.instagram.com/", "").replace("instagram.com/", "").replace("/", "")
-            target_url = f"https://www.instagram.com/{clean_username}/"
             
-            print(f"🔍 調査開始: @{clean_username}")
+            # 💡 ガードを回避するため、通常のプロフィールではなく、最新投稿の埋め込みページ（embed）を経由する
+            # ユーザー名から直接プロフィールデータを引っ張るためのメタデータURL
+            target_url = f"https://www.instagram.com/{clean_username}/?__a=1&__d=dis"
+            
+            print(f"🔍 調査開始（回避ルート）: @{clean_username}")
             
             try:
+                # 1つ目の回避策：データ配信用URLを叩いてみる
                 page.goto(target_url, wait_until="domcontentloaded", timeout=30000)
-                page.wait_for_timeout(5000) # Instagramは読み込みが重いため少し長めに待機
-                
+                page.wait_for_timeout(3000)
                 raw_html = page.content()
-                counts = extract_instagram_counts(raw_html)
                 
+                counts = extract_instagram_counts_from_embed(raw_html)
+                
+                # もし上記で取れなかった場合、通常のプロフィール画面から文字だけでも掠め取る保険
+                if counts["followers"] == 0:
+                    profile_url = f"https://www.instagram.com/{clean_username}/"
+                    page.goto(profile_url, wait_until="domcontentloaded", timeout=30000)
+                    page.wait_for_timeout(4000)
+                    
+                    # メタタグ（<meta name="description" content="...フォロワー13.4万人..." />）から正規表現で抜く
+                    meta_content = page.locator('meta[name="description"]').get_attribute("content")
+                    if meta_content:
+                        # 例: "13.4M Followers" や "13.4万人のフォロワー" から数字を抽出
+                        print(f" ℹ️ メタデータから抽出を試みます: {meta_content}")
+                        match_meta = re.search(r'([\d.,万KM]+)\s*(?:人の)?フォロワー', meta_content)
+                        if match_meta:
+                            # 簡易的な変換ロジック（完全に1桁にはなりませんが、ブロックされるよりは数値を残せます）
+                            val = match_meta.group(1).replace(',', '')
+                            if '万' in val: counts["followers"] = int(float(val.replace('万', '')) * 10000)
+                            elif 'M' in val: counts["followers"] = int(float(val.replace('M', '')) * 1000000)
+                            elif 'K' in val: counts["followers"] = int(float(val.replace('K', '')) * 1000)
+                            else: counts["followers"] = int(val)
+
                 followers_num = counts["followers"]
                 following_num = counts["following"]
                 posts_num = counts["posts"]
 
-                if followers_num > 0 or following_num > 0:
-                    # 2枚目のシートに追記
+                if followers_num > 0:
                     ws.append_row([now_str, clean_username, following_num, followers_num, posts_num])
-                    print(f" ✅ Success: {clean_username} (Followers: {followers_num:,}, Following: {following_num:,}, Posts: {posts_num:,})")
+                    print(f" ✅ Success: {clean_username} (Followers: {followers_num:,})")
                 else:
-                    print(f" ❌ Failed: {clean_username} (生HTML内に数値が見つかりませんでした。一時的なブロックの可能性があります)")
+                    print(f" ❌ Failed: {clean_username} (Instagramの強力なブロックを突破できませんでした)")
 
             except Exception as e:
-                print(f" ⚠️ 解析エラー: @{clean_username} - {e}")
+                print(f" ⚠️ エラー: @{clean_username} - {e}")
 
-            # 連続アクセス対策のランダムウェイト（少し長め）
-            page.wait_for_timeout(random.randint(3000, 7000))
+            page.wait_for_timeout(random.randint(4000, 8000))
 
         browser.close()
-    print("✨ 全すべてのInstagram処理が終了しました。")
+    print("✨ 処理が終了しました。")
 
 if __name__ == "__main__":
     sys.stdout.reconfigure(line_buffering=True)
