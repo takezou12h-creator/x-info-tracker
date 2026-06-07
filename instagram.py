@@ -8,8 +8,44 @@ import gspread
 from google.oauth2.service_account import Credentials
 from playwright.sync_api import sync_playwright
 
+def parse_sns_count(text_val):
+    """
+    「13.4万」「134K」「1,505」のようなSNS特有の表記を
+    計算可能な「純粋な整数（int）」に変換する関数
+    """
+    if not text_val or text_val == "不明":
+        return 0
+    
+    # 基本的なクリーニング（コンマ、空白、前後の余計な文字を削除）
+    cleaned = text_val.replace(",", "").strip()
+    
+    try:
+        # 1. 「万」または「W」の処理 (例: 13.4万 -> 134000)
+        if '万' in cleaned or 'W' in cleaned or 'w' in cleaned:
+            num_part = re.findall(r"[\d\.]+", cleaned)[0]
+            return int(float(num_part) * 10000)
+        
+        # 2. 「K」または「k」の処理 (例: 134K -> 134000)
+        elif 'K' in cleaned or 'k' in cleaned:
+            num_part = re.findall(r"[\d\.]+", cleaned)[0]
+            return int(float(num_part) * 1000)
+        
+        # 3. 「M」または「m」の処理 (例: 1.2M -> 1200000)
+        elif 'M' in cleaned or 'm' in cleaned:
+            num_part = re.findall(r"[\d\.]+", cleaned)[0]
+            return int(float(num_part) * 1000000)
+        
+        # 4. 通常の数字のみの場合 (例: 1505)
+        else:
+            num_part = re.findall(r"\d+", cleaned)[0]
+            return int(num_part)
+            
+    except Exception as e:
+        print(f" ⚠️ 数値変換エラー ({text_val}): {e}")
+        return 0
+
 def scrape_instagram_to_sheets():
-    print("🚀 Instagram収集プログラム（画面文字ピンポイント抽出版）を開始しました")
+    print("🚀 Instagram収集プログラム（整数変換・自動集計版）を開始しました")
     
     # --- 1. Google Sheets APIの認証 ---
     try:
@@ -70,50 +106,46 @@ def scrape_instagram_to_sheets():
             print(f"🔍 調査開始: @{clean_username}")
             
             try:
-                # ページを完全に読み込む
                 page.goto(target_url, wait_until="networkidle", timeout=30000)
-                page.wait_for_timeout(5000) # 念のため追加で待機
+                page.wait_for_timeout(5000)
                 
-                followers_text = "不明"
-                following_text = "不明"
-                posts_text = "不明"
+                raw_followers = "0"
+                raw_following = "0"
+                raw_posts = "0"
                 
-                # 💡 対策：画面上の「フォロワー」「following」という文字列を含む要素を直接指定
-                # 英語環境・日本語環境のどちらでもヒットするように両方のキーワードで対応します
+                # 画面上の要素から文字列を抽出
                 try:
-                    # 1. フォロワー数の取得
                     followers_element = page.locator('a[href*="/followers/"], span:has-text("followers"), span:has-text("フォロワー")').first
                     if followers_element.is_visible():
-                        raw_f = followers_element.inner_text()
-                        # 「13.4万 フォロワー」や「13.4M followers」から純粋な数値部分だけを抽出
-                        followers_text = raw_f.replace("フォロワー", "").replace("followers", "").replace("人", "").strip()
-                except Exception as e:
-                    print(f"  ⚠️ フォロワー数取得エラー: {e}")
+                        raw_followers = followers_element.inner_text().replace("フォロワー", "").replace("followers", "").strip()
+                except:
+                    pass
                     
                 try:
-                    # 2. フォロー中の取得
                     following_element = page.locator('a[href*="/following/"], span:has-text("following"), span:has-text("フォロー中")').first
                     if following_element.is_visible():
-                        raw_g = following_element.inner_text()
-                        following_text = raw_g.replace("フォロー中", "").replace("following", "").replace("人", "").strip()
-                except Exception as e:
-                    print(f"  ⚠️ フォロー中取得エラー: {e}")
+                        raw_following = following_element.inner_text().replace("フォロー中", "").replace("following", "").strip()
+                except:
+                    pass
                     
                 try:
-                    # 3. 投稿数の取得
                     posts_element = page.locator('span:has-text("posts"), li:has-text("投稿")').first
                     if posts_element.is_visible():
-                        raw_p = posts_element.inner_text()
-                        posts_text = raw_p.replace("投稿", "").replace("posts", "").replace("件", "").strip()
-                except Exception as e:
-                    print(f"  ⚠️ 投稿数取得エラー: {e}")
+                        raw_posts = posts_element.inner_text().replace("投稿", "").replace("posts", "").strip()
+                except:
+                    pass
 
-                # スプレッドシートへ書き込み
-                if followers_text != "不明" and followers_text != "":
-                    ws.append_row([now_str, clean_username, following_text, followers_text, posts_text])
-                    print(f" ✅ Success: {clean_username} (フォロワー: {followers_text}, フォロー中: {following_text}, 投稿: {posts_text})")
+                # 💡 ここでテキスト表現を「整数」に一括変換
+                followers_num = parse_sns_count(raw_followers)
+                following_num = parse_sns_count(raw_following)
+                posts_num = parse_sns_count(raw_posts)
+
+                # スプレッドシートへ書き込み（int型で渡すことでコンマなしの綺麗な数値になります）
+                if followers_num > 0 or following_num > 0:
+                    ws.append_row([now_str, clean_username, following_num, followers_num, posts_num])
+                    print(f" ✅ Success: {clean_username} (フォロワー: {followers_num}, フォロー中: {following_num}, 投稿: {posts_num})")
                 else:
-                    print(f" ❌ Failed: {clean_username} (画面上の要素から文字を取得できませんでした)")
+                    print(f" ❌ Failed: {clean_username} (画面上の数値を特定できませんでした)")
 
             except Exception as e:
                 print(f" ⚠️ 通信エラー: @{clean_username} - {e}")
