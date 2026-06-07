@@ -49,9 +49,26 @@ def scrape_to_sheets():
                 if "UserByScreenName" in res.url and res.status == 200:
                     try:
                         data = res.json()
-                        u = data['data']['user']['result']['legacy']
-                        current_data.update({"followers": u['followers_count'], "following": u['friends_count'], "posts": u['statuses_count']})
-                    except: pass
+                        
+                        # Xの仕様変更（階層のズレ）に対応するため、安全にデータを掘り進む
+                        user_result = data.get('data', {}).get('user', {}).get('result', {})
+                        
+                        # 稀に result の直下ではなく、result['user'] や result['core'] に入るケースをケア
+                        if 'legacy' in user_result:
+                            u = user_result['legacy']
+                        elif 'user' in user_result and 'legacy' in user_result['user']:
+                            u = user_result['user']['legacy']
+                        else:
+                            u = None
+                        
+                        if u:
+                            current_data.update({
+                                "followers": u.get('followers_count'),
+                                "following": u.get('friends_count'),
+                                "posts": u.get('statuses_count')
+                            })
+                    except Exception as e:
+                        print(f" ⚠️ レスポンス解析エラー: {e}")
 
             page.on("response", handle_response)
             try:
