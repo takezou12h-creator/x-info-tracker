@@ -9,7 +9,7 @@ from google.oauth2.service_account import Credentials
 from playwright.sync_api import sync_playwright
 
 def scrape_instagram_to_sheets():
-    print("🚀 Instagram収集プログラム（セッション注入版）を開始しました")
+    print("🚀 Instagram収集プログラム（セッション注入・安定版）を開始しました")
     
     # --- 1. Google Sheets APIの認証 ---
     try:
@@ -42,14 +42,12 @@ def scrape_instagram_to_sheets():
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         
-        # 💡 セッションID（Cookie）の取得
         session_id = os.environ.get("INSTAGRAM_SESSION_ID")
         
         context = browser.new_context(
             user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         )
         
-        # GitHubのブラウザにログイン状態を擬似的に覚えさせる
         if session_id:
             context.add_cookies([{
                 'name': 'sessionid',
@@ -61,7 +59,7 @@ def scrape_instagram_to_sheets():
             }])
             print("🔑 ログインセッションをブラウザに注入しました。")
         else:
-            print("⚠️ 警告: INSTAGRAM_SESSION_ID が設定されていません。ログインなしで続行します。")
+            print("⚠️ 警告: INSTAGRAM_SESSION_ID が設定されていません。")
 
         page = context.new_page()
 
@@ -72,39 +70,61 @@ def scrape_instagram_to_sheets():
             print(f"🔍 調査開始: @{clean_username}")
             
             try:
-                # ログイン状態なので通常URLで堂々と開けます
+                # domcontentloadedで素早くページを開く
                 page.goto(target_url, wait_until="domcontentloaded", timeout=30000)
-                page.wait_for_timeout(5000) # 画面の文字が出揃うのを待つ
+                page.wait_for_timeout(5000) # データの読み込み時間を十分に確保
                 
-                # 画面上の「フォロワー」「フォロー中」「投稿」の文字エリアを特定してテキストを引っこ抜く
-                # ログイン状態の画面構成に対応したセレクタです
+                # 💡 対策：要素（liなど）ではなく、ページ全体のHTMLテキスト（ソース）を丸ごと取得
+                raw_html = page.content()
+                
                 followers_text = "不明"
                 following_text = "不明"
                 posts_text = "不明"
                 
-                try:
-                    # 「◯万」や「◯◯人」と書かれた要素を狙い撃ち
-                    posts_text = page.locator('header section ul li').nth(0).inner_text()
-                    followers_text = page.locator('header section ul li').nth(1).inner_text()
-                    following_text = page.locator('header section ul li').nth(2).inner_text()
+                # ログイン済みのクリーンなHTML内にあるメタデータテキストから数値を抽出
+                # 例: "edge_followed_by":{"count":134257} のような構造、または一般用メタテキストを検索
+                meta_match = re.search(r'meta\s+name="description"\s+content="([^"]+)"', raw_html)
+                if meta_match:
+                    meta_content = meta_match.group(1)
+                    print(f" 📄 解析対象テキスト: {meta_content}")
                     
-                    # 不要な文字（フォロワー、投稿など）を削ってすっきりさせる
-                    posts_text = posts_text.replace("投稿", "").replace("件", "").strip()
-                    followers_text = followers_text.replace("フォロワー", "").replace("人", "").strip()
-                    following_text = following_text.replace("フォロー中", "").replace("人", "").strip()
-                except Exception as inner_e:
-                    print(f" ⚠️ 画面要素の取得に一部失敗: {inner_e}")
+                    # 日本語表記の切り出し
+                    f_match = re.search(r'フォロワー([\d.,万KM]+人?)', meta_content)
+                    g_match = re.search(r'フォロー中([\d.,万KM]+人?)', meta_content)
+                    p_match = re.search(r'投稿([\d.,万KM]+件?)', meta_content)
+                    
+                    if f_match: followers_text = f_match.group(1).replace('人', '').strip()
+                    if g_match: following_text = g_match.group(1).replace('人', '').strip()
+                    if p_match: posts_text = p_match.group(1).replace('件', '').strip()
+
+                # 万が一上記で文字が取れなかった場合の「最終バックアップ案（タイトルから抽出）」
+                if followers_text == "不明":
+                    page_title = page.title()
+                    print(f" ℹ️ バックアップ解析（タイトル）: {page_title}")
+                    # タイトルに数値が含まれているパターンのパース
+                    title_match = re.search(r'([\d.,万KM]+)\s*(?:Followers|フォロワー)', page_title, re.IGNORECASE)
+                    if title_match:
+                        followers_text = title_match.group(1).strip()
+
+                # 最悪、フォロワー数だけでも画面上の別の場所から文字で掠め取る
+                if followers_text == "不明":
+                    try:
+                        # 画面上の「フォロワー」という文字が含まれる要素のテキストを直接取得
+                        followers_text = page.locator('a[href*="/followers/"]').inner_text()
+                        followers_text = followers_text.replace("フォロワー", "").replace("人", "").strip()
+                    except:
+                        pass
 
                 if followers_text != "不明" and followers_text != "":
                     ws.append_row([now_str, clean_username, following_text, followers_text, posts_text])
                     print(f" ✅ Success: {clean_username} (フォロワー: {followers_text}, フォロー中: {following_text}, 投稿: {posts_text})")
                 else:
-                    print(f" ❌ Failed: {clean_username} (ログイン壁は越えましたが、画面上の文字を取得できませんでした)")
+                    print(f" ❌ Failed: {clean_username} (HTMLのパースに失敗しました)")
 
             except Exception as e:
                 print(f" ⚠️ 通信エラー: @{clean_username} - {e}")
 
-            page.wait_for_timeout(random.randint(3000, 6000))
+            page.wait_for_timeout(random.randint(4000, 7000))
 
         browser.close()
     print("✨ すべてのInstagram処理が終了しました。")
