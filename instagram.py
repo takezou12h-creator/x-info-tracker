@@ -9,7 +9,7 @@ from google.oauth2.service_account import Credentials
 from playwright.sync_api import sync_playwright
 
 def scrape_instagram_to_sheets():
-    print("🚀 Instagram簡易収集プログラム（メタタグ版）を開始しました")
+    print("🚀 Instagram収集プログラム（セッション注入版）を開始しました")
     
     # --- 1. Google Sheets APIの認証 ---
     try:
@@ -21,7 +21,7 @@ def scrape_instagram_to_sheets():
         
         sheet_id = os.environ.get("SPREADSHEET_ID")
         sh = client.open_by_key(sheet_id)
-        ws = sh.get_worksheet(1) # 2枚目のシートを指定
+        ws = sh.get_worksheet(1) # 2枚目のシート
         print(f"🎯 スプレッドシート接続成功: {sh.title} / シート名: {ws.title}")
     except Exception as e:
         print(f"❌ Google Sheets 接続エラー: {e}")
@@ -38,12 +38,31 @@ def scrape_instagram_to_sheets():
     print(f"📋 読み込んだInstagramアカウント数: {len(usernames)} 件")
     now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
-    # --- 3. Playwrightでメタデータのみを高速抽出 ---
+    # --- 3. Playwright処理 ---
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
+        
+        # 💡 セッションID（Cookie）の取得
+        session_id = os.environ.get("INSTAGRAM_SESSION_ID")
+        
         context = browser.new_context(
             user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         )
+        
+        # GitHubのブラウザにログイン状態を擬似的に覚えさせる
+        if session_id:
+            context.add_cookies([{
+                'name': 'sessionid',
+                'value': session_id,
+                'domain': '.instagram.com',
+                'path': '/',
+                'secure': True,
+                'httpOnly': True
+            }])
+            print("🔑 ログインセッションをブラウザに注入しました。")
+        else:
+            print("⚠️ 警告: INSTAGRAM_SESSION_ID が設定されていません。ログインなしで続行します。")
+
         page = context.new_page()
 
         for username in usernames:
@@ -53,45 +72,39 @@ def scrape_instagram_to_sheets():
             print(f"🔍 調査開始: @{clean_username}")
             
             try:
-                # domcontentloaded（HTML構造の読み込み完了）の時点で即処理に入るため、超高速です
-                page.goto(target_url, wait_until="domcontentloaded", timeout=20000)
+                # ログイン状態なので通常URLで堂々と開けます
+                page.goto(target_url, wait_until="domcontentloaded", timeout=30000)
+                page.wait_for_timeout(5000) # 画面の文字が出揃うのを待つ
                 
-                # Googleなどのロボット向けに公開されている description メタタグを狙い撃ち
-                meta_element = page.locator('meta[name="description"]')
-                meta_content = meta_element.get_attribute("content")
+                # 画面上の「フォロワー」「フォロー中」「投稿」の文字エリアを特定してテキストを引っこ抜く
+                # ログイン状態の画面構成に対応したセレクタです
+                followers_text = "不明"
+                following_text = "不明"
+                posts_text = "不明"
                 
-                if meta_content:
-                    print(f" 📄 キャッチしたメタテキスト: {meta_content}")
+                try:
+                    # 「◯万」や「◯◯人」と書かれた要素を狙い撃ち
+                    posts_text = page.locator('header section ul li').nth(0).inner_text()
+                    followers_text = page.locator('header section ul li').nth(1).inner_text()
+                    following_text = page.locator('header section ul li').nth(2).inner_text()
                     
-                    # 日本語表記パターンから「フォロワー」「フォロー中」「投稿」を抽出
-                    followers_match = re.search(r'フォロワー([\d.,万KM]+人?)', meta_content)
-                    following_match = re.search(r'フォロー中([\d.,万KM]+人?)', meta_content)
-                    posts_match = re.search(r'投稿([\d.,万KM]+件?)', meta_content)
-                    
-                    # 英語表記パターンの場合の保険
-                    if not followers_match:
-                        followers_match = re.search(r'([\d.,万KM]+)\s*Followers', meta_content, re.IGNORECASE)
-                    if not following_match:
-                        following_match = re.search(r'([\d.,万KM]+)\s*Following', meta_content, re.IGNORECASE)
-                    if not posts_match:
-                        posts_match = re.search(r'([\d.,万KM]+)\s*Posts', meta_content, re.IGNORECASE)
+                    # 不要な文字（フォロワー、投稿など）を削ってすっきりさせる
+                    posts_text = posts_text.replace("投稿", "").replace("件", "").strip()
+                    followers_text = followers_text.replace("フォロワー", "").replace("人", "").strip()
+                    following_text = following_text.replace("フォロー中", "").replace("人", "").strip()
+                except Exception as inner_e:
+                    print(f" ⚠️ 画面要素の取得に一部失敗: {inner_e}")
 
-                    # テキストとしてそのままスプレッドシートに記録（例: "13.4万人"、"242人"）
-                    f_val = followers_match.group(1).replace('人', '').strip() if followers_match else "不明"
-                    g_val = following_match.group(1).replace('人', '').strip() if following_match else "不明"
-                    p_val = posts_match.group(1).replace('件', '').strip() if posts_match else "不明"
-
-                    # スプレッドシートの2枚目（インスタ用シート）に格納
-                    ws.append_row([now_str, clean_username, g_val, f_val, p_val])
-                    print(f" ✅ Success: {clean_username} (フォロワー: {f_val}, フォロー中: {g_val}, 投稿: {p_val})")
+                if followers_text != "不明" and followers_text != "":
+                    ws.append_row([now_str, clean_username, following_text, followers_text, posts_text])
+                    print(f" ✅ Success: {clean_username} (フォロワー: {followers_text}, フォロー中: {following_text}, 投稿: {posts_text})")
                 else:
-                    print(f" ❌ Failed: {clean_username} (メタデータが空でした)")
+                    print(f" ❌ Failed: {clean_username} (ログイン壁は越えましたが、画面上の文字を取得できませんでした)")
 
             except Exception as e:
                 print(f" ⚠️ 通信エラー: @{clean_username} - {e}")
 
-            # 念のための待機
-            page.wait_for_timeout(random.randint(2000, 4000))
+            page.wait_for_timeout(random.randint(3000, 6000))
 
         browser.close()
     print("✨ すべてのInstagram処理が終了しました。")
