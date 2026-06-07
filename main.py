@@ -79,21 +79,30 @@ def scrape_to_sheets():
                 # 画面がしっかりレンダリングされるのを待つ
                 page.wait_for_timeout(5000)
                 
-                # HTMLのテキスト全体から「フォロー中」「フォロワー」の直前にある数字を抽出する最新の指定方法
-                # クラス名や裏の通信に依存しないため、非常に頑丈です
-                following_text = page.locator('a[href$="/following"] span').first.inner_text(timeout=5000)
-                followers_text = page.locator('a[href$="/verified_followers"] span, a[href$="/followers"] span').first.inner_text(timeout=5000)
+                # --- 1人単位の正確な数値を隠し属性からぶっこ抜く最新ロジック ---
                 
-                # ポスト数は、画面上の「ポスト」や「件のポスト」の文字列から抽出を試みる
+                # 1. フォロー数の取得（aタグ全体の title 属性、または内部の文字を狙う）
+                following_element = page.locator('a[href$="/following"]').first
+                # title属性（例: "277" や "1,234"）を取得、なければ画面の文字
+                following_raw = following_element.get_attribute("title") or following_element.inner_text(timeout=5000)
+                
+                # 2. フォロワー数の取得
+                followers_element = page.locator('a[href$="/verified_followers"], a[href$="/followers"]').first
+                followers_raw = followers_element.get_attribute("title") or followers_element.inner_text(timeout=5000)
+                
+                # 「1,234 フォロワー」などの文字列から、純粋な数字とカンマ、万・億だけを綺麗に残す
+                following_text = "".join(re.findall(r'[\d,万億KM.]+', following_raw))
+                followers_text = "".join(re.findall(r'[\d,万億KM.]+', followers_raw))
+                
+                # ポスト数はヘッダーの下部から数字だけを抽出
                 posts_text = "0"
                 try:
-                    # ユーザー名のパズル下部などの「◯件のポスト」というエリアを狙う
                     posts_element = page.locator('header + div div div div div:has-text("ポスト")').last
-                    posts_text = re.sub(r'\D', '', posts_element.inner_text())
+                    posts_text = "".join(re.findall(r'[\d,]+', posts_element.inner_text()))
                 except:
                     pass
 
-                # 数値に変換
+                # 数値に変換（カンマを除去してint型にする）
                 following_num = convert_str_to_int(following_text)
                 followers_num = convert_str_to_int(followers_text)
                 posts_num = convert_str_to_int(posts_text)
@@ -101,9 +110,9 @@ def scrape_to_sheets():
                 if followers_num > 0 or following_num > 0:
                     # スプレッドシートに追記
                     ws.append_row([now_str, username, following_num, followers_num, posts_num])
-                    print(f" ✅ Success: {username} (Followers: {followers_num}, Following: {following_num})")
+                    print(f" ✅ Success: {username} (Followers: {followers_num:,}, Following: {following_num:,})")
                 else:
-                    print(f" ❌ Failed: {username} (画面上の数値が0または取得不可)")
+                    print(f" ❌ Failed: {username} (数値が正常に取得できませんでした)")
 
             except Exception as e:
                 print(f" ⚠️ 解析エラー: @{username} - {e}")
