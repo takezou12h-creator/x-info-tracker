@@ -29,3 +29,9 @@ jobs:
           GCP_JSON_KEY: ${{ secrets.GCP_JSON_KEY }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
         run: python main.py
+
+      - name: Upload HTML for Debug
+        uses: actions/upload-artifact@v4
+        with:
+          name: x-html-source
+          path: x_page.html
