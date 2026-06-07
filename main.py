@@ -7,54 +7,25 @@ import gspread
 from google.oauth2.service_account import Credentials
 from playwright.sync_api import sync_playwright
 
-def scrape_to_sheets():
-    print("Step 1: プログラムを開始しました")
+def debug_x_response():
+    print("🚀 【デバッグモード】Xのレスポンス構造を解読します...")
     
-    # --- 1. Google Sheets APIの認証 ---
-    try:
-        scopes = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
-        env_key = os.environ.get("GCP_JSON_KEY")
-        if not env_key:
-            print("❌ エラー: GCP_JSON_KEY が環境変数に見つかりません。")
-            return
-            
-        info = json.loads(env_key)
-        creds = Credentials.from_service_account_info(info, scopes=scopes)
-        client = gspread.authorize(creds)
-        
-        sheet_id = os.environ.get("SPREADSHEET_ID")
-        if not sheet_id:
-            print("❌ エラー: SPREADSHEET_ID が環境変数に見つかりません。")
-            return
-            
-        sh = client.open_by_key(sheet_id)
-        ws = sh.get_worksheet(0) 
-        print(f"🎯 スプレッドシート接続成功: {sh.title} / {ws.title}")
-
-    except Exception as e:
-        print(f"❌ Google Sheets 接続エラー: {e}")
-        # 詳細なエラー情報を出すために例外を発生させて強制終了させる
-        raise e
-
-    # --- 2. ターゲットの読み込み ---
+    # ターゲット読み込み
     input_csv = "targets.csv"
     if not os.path.exists(input_csv):
-        print(f"❌ エラー: {input_csv} が見つかりません。現在のディレクトリのファイル一覧:")
-        print(os.listdir("."))
+        print("❌ targets.csv が見つかりません。")
         return
     
     with open(input_csv, 'r') as f:
         usernames = [line.strip() for line in f if line.strip()]
-    
-    print(f"📋 読み込んだアカウント数: {len(usernames)} 件")
+        
     if not usernames:
-        print("⚠️ 調査対象のアカウントがCSVに記述されていません。")
+        print("❌ アカウントリストが空です。")
         return
+        
+    target_user = usernames[0]
+    print(f"📋 解析対象アカウント（最初の1件）: @{target_user}")
 
-    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
-    # --- 3. Xのスクレイピング ---
-    print("Step 2: Playwright を起動します...")
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(
@@ -62,73 +33,55 @@ def scrape_to_sheets():
         )
         page = context.new_page()
 
-        for username in usernames:
-            print(f"🔍 調査開始: @{username}")
-            current_data = {"followers": None, "following": None, "posts": None}
+        # レスポンスを監視して中身を解剖する関数
+        def handle_response(res):
+            if "UserByScreenName" in res.url and res.status == 200:
+                print("\n=== 🎯 UserByScreenName の通信をキャッチしました ===")
+                try:
+                    data = res.json()
+                    
+                    # 1. 最上位のキーを確認
+                    print(f"📦 ルート直下のキー: {list(data.keys())}")
+                    
+                    if 'data' in data:
+                        print(f"📦 data 直下のキー: {list(data['data'].keys())}")
+                        if 'user' in data['data']:
+                            print(f"📦 user 直下のキー: {list(data['data']['user'].keys())}")
+                            if 'result' in data['data']['user']:
+                                result_node = data['data']['user']['result']
+                                print(f"📦 result 直下のキー: {list(result_node.keys())}")
+                                
+                                # もし階層が深ければさらにその下も表示
+                                if 'user' in result_node:
+                                    print(f"📦 result['user'] 直下のキー: {list(result_node['user'].keys())}")
+                    
+                    # 2. JSONの全容を把握するため、文字列を一部整形して出力
+                    raw_json_str = json.dumps(data, ensure_ascii=False)
+                    print("\n--- 📝 生データの冒頭500文字 ---")
+                    print(raw_json_str[:500])
+                    print("--------------------------------")
+                    
+                    # 3. 特定のキーワードがどこに含まれているか全探索
+                    print("\n🔎 キーワードの生存確認:")
+                    print(f" ・'followers_count' の有無: {'followers_count' in raw_json_str}")
+                    print(f" ・'legacy' の有無: {'legacy' in raw_json_str}")
+                    print(f" ・'rest_id' の有無: {'rest_id' in raw_json_str}")
+                    print("==================================================\n")
+                    
+                except Exception as e:
+                    print(f"❌ JSONの解析中にエラー: {e}")
 
-            def handle_response(res):
-                if "UserByScreenName" in res.url and res.status == 200:
-                    try:
-                        data = res.json()
-                        
-                        # --- どんな階層に隠されても legacy を自動で見つける探索ロジック ---
-                        def find_legacy_data(obj):
-                            if isinstance(obj, dict):
-                                if 'legacy' in obj:
-                                    return obj['legacy']
-                                for key, value in obj.items():
-                                    result = find_legacy_data(value)
-                                    if result:
-                                        return result
-                            elif isinstance(obj, list):
-                                for item in obj:
-                                    result = find_legacy_data(item)
-                                    if result:
-                                        return result
-                            return None
-
-                        # 生データ全体から legacy の塊を自動検索
-                        u = find_legacy_data(data)
-                        
-                        if u and 'followers_count' in u:
-                            current_data.update({
-                                "followers": u.get('followers_count'),
-                                "following": u.get('friends_count'),
-                                "posts": u.get('statuses_count')
-                            })
-                            
-                    except Exception as e:
-                        print(f" ⚠️ レスポンス解析失敗: {e}")
-
-            page.on("response", handle_response)
+        page.on("response", handle_response)
+        
+        try:
+            page.goto(f"https://x.com/{target_user}", wait_until="domcontentloaded", timeout=30000)
+            page.wait_for_timeout(7000) # 通信を確実に待つために少し長めに待機
+        except Exception as e:
+            print(f"⚠️ ページ遷移エラー: {e}")
             
-            try:
-                page.goto(f"https://x.com/{username}", wait_until="domcontentloaded", timeout=30000)
-                page.wait_for_timeout(5000)
-                
-                if current_data["followers"] is not None:
-                    ws.append_row([
-                        now_str, 
-                        username, 
-                        current_data["following"], 
-                        current_data["followers"], 
-                        current_data["posts"]
-                    ])
-                    print(f" ✅ Success: {username} ({current_data['followers']} followers)")
-                else:
-                    print(f" ❌ Failed: {username} (データが取得できませんでした)")
-
-            except Exception as e:
-                print(f" ⚠️ 通信エラー: @{username} - {e}")
-
-            page.remove_listener("response", handle_response)
-            page.wait_for_timeout(random.randint(2000, 5000))
-
         browser.close()
-
-    print("✨ すべての処理が終了しました。")
+    print("🏁 デバッグ用の検証が終了しました。")
 
 if __name__ == "__main__":
-    # ログが出力バッファに溜まって消えるのを防ぐ設定
     sys.stdout.reconfigure(line_buffering=True)
-    scrape_to_sheets()
+    debug_x_response()
