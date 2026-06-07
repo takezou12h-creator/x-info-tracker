@@ -70,21 +70,33 @@ def scrape_to_sheets():
                 if "UserByScreenName" in res.url and res.status == 200:
                     try:
                         data = res.json()
-                        user_result = data.get('data', {}).get('user', {}).get('result', {})
                         
-                        if 'legacy' in user_result:
-                            u = user_result['legacy']
-                        elif 'user' in user_result and 'legacy' in user_result['user']:
-                            u = user_result['user']['legacy']
-                        else:
-                            u = None
+                        # --- どんな階層に隠されても legacy を自動で見つける探索ロジック ---
+                        def find_legacy_data(obj):
+                            if isinstance(obj, dict):
+                                if 'legacy' in obj:
+                                    return obj['legacy']
+                                for key, value in obj.items():
+                                    result = find_legacy_data(value)
+                                    if result:
+                                        return result
+                            elif isinstance(obj, list):
+                                for item in obj:
+                                    result = find_legacy_data(item)
+                                    if result:
+                                        return result
+                            return None
+
+                        # 生データ全体から legacy の塊を自動検索
+                        u = find_legacy_data(data)
                         
-                        if u:
+                        if u and 'followers_count' in u:
                             current_data.update({
                                 "followers": u.get('followers_count'),
                                 "following": u.get('friends_count'),
                                 "posts": u.get('statuses_count')
                             })
+                            
                     except Exception as e:
                         print(f" ⚠️ レスポンス解析失敗: {e}")
 
