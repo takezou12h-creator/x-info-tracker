@@ -9,7 +9,7 @@ from google.oauth2.service_account import Credentials
 from playwright.sync_api import sync_playwright
 
 def scrape_instagram_to_sheets():
-    print("🚀 Instagram収集プログラム（セッション注入・安定版）を開始しました")
+    print("🚀 Instagram収集プログラム（画面文字ピンポイント抽出版）を開始しました")
     
     # --- 1. Google Sheets APIの認証 ---
     try:
@@ -70,56 +70,50 @@ def scrape_instagram_to_sheets():
             print(f"🔍 調査開始: @{clean_username}")
             
             try:
-                # domcontentloadedで素早くページを開く
-                page.goto(target_url, wait_until="domcontentloaded", timeout=30000)
-                page.wait_for_timeout(5000) # データの読み込み時間を十分に確保
-                
-                # 💡 対策：要素（liなど）ではなく、ページ全体のHTMLテキスト（ソース）を丸ごと取得
-                raw_html = page.content()
+                # ページを完全に読み込む
+                page.goto(target_url, wait_until="networkidle", timeout=30000)
+                page.wait_for_timeout(5000) # 念のため追加で待機
                 
                 followers_text = "不明"
                 following_text = "不明"
                 posts_text = "不明"
                 
-                # ログイン済みのクリーンなHTML内にあるメタデータテキストから数値を抽出
-                # 例: "edge_followed_by":{"count":134257} のような構造、または一般用メタテキストを検索
-                meta_match = re.search(r'meta\s+name="description"\s+content="([^"]+)"', raw_html)
-                if meta_match:
-                    meta_content = meta_match.group(1)
-                    print(f" 📄 解析対象テキスト: {meta_content}")
+                # 💡 対策：画面上の「フォロワー」「following」という文字列を含む要素を直接指定
+                # 英語環境・日本語環境のどちらでもヒットするように両方のキーワードで対応します
+                try:
+                    # 1. フォロワー数の取得
+                    followers_element = page.locator('a[href*="/followers/"], span:has-text("followers"), span:has-text("フォロワー")').first
+                    if followers_element.is_visible():
+                        raw_f = followers_element.inner_text()
+                        # 「13.4万 フォロワー」や「13.4M followers」から純粋な数値部分だけを抽出
+                        followers_text = raw_f.replace("フォロワー", "").replace("followers", "").replace("人", "").strip()
+                except Exception as e:
+                    print(f"  ⚠️ フォロワー数取得エラー: {e}")
                     
-                    # 日本語表記の切り出し
-                    f_match = re.search(r'フォロワー([\d.,万KM]+人?)', meta_content)
-                    g_match = re.search(r'フォロー中([\d.,万KM]+人?)', meta_content)
-                    p_match = re.search(r'投稿([\d.,万KM]+件?)', meta_content)
+                try:
+                    # 2. フォロー中の取得
+                    following_element = page.locator('a[href*="/following/"], span:has-text("following"), span:has-text("フォロー中")').first
+                    if following_element.is_visible():
+                        raw_g = following_element.inner_text()
+                        following_text = raw_g.replace("フォロー中", "").replace("following", "").replace("人", "").strip()
+                except Exception as e:
+                    print(f"  ⚠️ フォロー中取得エラー: {e}")
                     
-                    if f_match: followers_text = f_match.group(1).replace('人', '').strip()
-                    if g_match: following_text = g_match.group(1).replace('人', '').strip()
-                    if p_match: posts_text = p_match.group(1).replace('件', '').strip()
+                try:
+                    # 3. 投稿数の取得
+                    posts_element = page.locator('span:has-text("posts"), li:has-text("投稿")').first
+                    if posts_element.is_visible():
+                        raw_p = posts_element.inner_text()
+                        posts_text = raw_p.replace("投稿", "").replace("posts", "").replace("件", "").strip()
+                except Exception as e:
+                    print(f"  ⚠️ 投稿数取得エラー: {e}")
 
-                # 万が一上記で文字が取れなかった場合の「最終バックアップ案（タイトルから抽出）」
-                if followers_text == "不明":
-                    page_title = page.title()
-                    print(f" ℹ️ バックアップ解析（タイトル）: {page_title}")
-                    # タイトルに数値が含まれているパターンのパース
-                    title_match = re.search(r'([\d.,万KM]+)\s*(?:Followers|フォロワー)', page_title, re.IGNORECASE)
-                    if title_match:
-                        followers_text = title_match.group(1).strip()
-
-                # 最悪、フォロワー数だけでも画面上の別の場所から文字で掠め取る
-                if followers_text == "不明":
-                    try:
-                        # 画面上の「フォロワー」という文字が含まれる要素のテキストを直接取得
-                        followers_text = page.locator('a[href*="/followers/"]').inner_text()
-                        followers_text = followers_text.replace("フォロワー", "").replace("人", "").strip()
-                    except:
-                        pass
-
+                # スプレッドシートへ書き込み
                 if followers_text != "不明" and followers_text != "":
                     ws.append_row([now_str, clean_username, following_text, followers_text, posts_text])
                     print(f" ✅ Success: {clean_username} (フォロワー: {followers_text}, フォロー中: {following_text}, 投稿: {posts_text})")
                 else:
-                    print(f" ❌ Failed: {clean_username} (HTMLのパースに失敗しました)")
+                    print(f" ❌ Failed: {clean_username} (画面上の要素から文字を取得できませんでした)")
 
             except Exception as e:
                 print(f" ⚠️ 通信エラー: @{clean_username} - {e}")
