@@ -72,7 +72,7 @@ def scrape_instagram_to_sheets():
         usernames = [line.strip() for line in f if line.strip()]
     
     print(f"📋 読み込んだInstagramアカウント数: {len(usernames)} 件")
-    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now_str = datetime.datetime.now().strftime("%Y-%m-%d")
     
     # --- 3. Playwright処理 ---
     with sync_playwright() as p:
