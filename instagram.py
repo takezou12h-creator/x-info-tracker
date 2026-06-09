@@ -112,7 +112,7 @@ def scrape_instagram_to_sheets():
             print(f"🔍 調査開始: @{clean_username}")
             
             try:
-                page.goto(target_url, wait_until="domcontentloaded", timeout=30000)
+                page.goto(target_url, wait_until="domcontentloaded", timeout=40000)
                 page.wait_for_timeout(random.randint(6000, 9000)) # 💡 読み込み完了後、少し長めに待つ
                 
                 raw_followers = "0"
