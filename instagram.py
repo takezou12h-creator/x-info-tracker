@@ -137,11 +137,18 @@ def scrape_instagram_to_sheets():
                     pass
                     
                 try:
-                    posts_element = page.locator('span:has-text("posts"), li:has-text("投稿")').first
+                    # 💡 対策：より広い階層から「投稿」「posts」というキーワードを持つ要素を柔軟に探索
+                    posts_element = page.locator('li:has-text("投稿"), li:has-text("posts"), span:has-text("投稿"), a[href$="/"] button:has-text("投稿")').first
+                    
                     if posts_element.is_visible():
-                        raw_posts = posts_element.inner_text().replace("投稿", "").replace("posts", "").strip()
-                except:
-                    pass
+                        raw_text = posts_element.inner_text()
+                        # 「1,507投稿」や「1,507 posts」のような文字列から、純粋な数値部分（1,507など）だけを抽出
+                        # これにより、文字の周りに余計なタグが挟まれても確実に数字を救済できます
+                        cleaned_posts = raw_text.replace("投稿", "").replace("posts", "").replace("件", "").strip()
+                        if cleaned_posts:
+                            raw_posts = cleaned_posts
+                except Exception as posts_e:
+                    print(f"  ⚠️ 投稿数抽出エラー: {posts_e}")
 
                 # テキスト表現を「整数」に一括変換
                 followers_num = parse_sns_count(raw_followers)
