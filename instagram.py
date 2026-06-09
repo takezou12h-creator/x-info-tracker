@@ -30,7 +30,7 @@ def parse_sns_count(text_val):
             num_part = re.findall(r"[\d\.]+", cleaned)[0]
             return int(float(num_part) * 1000)
         
-        # 3. 「M」または「m」の処理 (例: 1.2M -> 1200000)
+        # 3. 「M']または「m」の処理 (例: 1.2M -> 1200000)
         elif 'M' in cleaned or 'm' in cleaned:
             num_part = re.findall(r"[\d\.]+", cleaned)[0]
             return int(float(num_part) * 1000000)
@@ -45,7 +45,7 @@ def parse_sns_count(text_val):
         return 0
 
 def scrape_instagram_to_sheets():
-    print("🚀 Instagram収集プログラム（整数変換・自動集計版）を開始しました")
+    print("🚀 Instagram収集プログラム（エラー通知連動版）を開始しました")
     
     # --- 1. Google Sheets APIの認証 ---
     try:
@@ -61,18 +61,21 @@ def scrape_instagram_to_sheets():
         print(f"🎯 スプレッドシート接続成功: {sh.title} / シート名: {ws.title}")
     except Exception as e:
         print(f"❌ Google Sheets 接続エラー: {e}")
-        return
+        sys.exit(1) # 💡 初期エラーのため、即座にエラー落ちさせて通知する
 
     # --- 2. ターゲットの読み込み ---
     input_csv = "targets_instagram.csv"
     if not os.path.exists(input_csv):
         print(f"❌ エラー: {input_csv} が見つかりません。")
-        return
+        sys.exit(1) # 💡 設定ファイル不在のためエラー落ち
     with open(input_csv, 'r') as f:
         usernames = [line.strip() for line in f if line.strip()]
     
     print(f"📋 読み込んだInstagramアカウント数: {len(usernames)} 件")
-    now_str = datetime.datetime.now().strftime("%Y-%m-%d")
+    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") # 💡 1日に複数回回しても時間が被らないよう秒まで記録
+    
+    # 成功件数をトラックする変数
+    success_count = 0
     
     # --- 3. Playwright処理 ---
     with sync_playwright() as p:
@@ -135,15 +138,16 @@ def scrape_instagram_to_sheets():
                 except:
                     pass
 
-                # 💡 ここでテキスト表現を「整数」に一括変換
+                # テキスト表現を「整数」に一括変換
                 followers_num = parse_sns_count(raw_followers)
                 following_num = parse_sns_count(raw_following)
                 posts_num = parse_sns_count(raw_posts)
 
-                # スプレッドシートへ書き込み（int型で渡すことでコンマなしの綺麗な数値になります）
+                # スプレッドシートへ書き込み
                 if followers_num > 0 or following_num > 0:
                     ws.append_row([now_str, clean_username, following_num, followers_num, posts_num])
                     print(f" ✅ Success: {clean_username} (フォロワー: {followers_num}, フォロー中: {following_num}, 投稿: {posts_num})")
+                    success_count += 1 # 💡 成功件数を加算
                 else:
                     print(f" ❌ Failed: {clean_username} (画面上の数値を特定できませんでした)")
 
@@ -153,7 +157,16 @@ def scrape_instagram_to_sheets():
             page.wait_for_timeout(random.randint(4000, 7000))
 
         browser.close()
-    print("✨ すべてのInstagram処理が終了しました。")
+        
+    # --- 4. 運行チェック（エラー通知連動用） ---
+    print(f"🏁 処理完了: {success_count} / {len(usernames)} 件の取得に成功しました。")
+    
+    # 💡 取得件数が0かつ、ターゲットが1件以上存在する場合はシステムを異常終了（エラーコード1）にする
+    if success_count == 0 and len(usernames) > 0:
+        print("❌ 致命的エラー: 全てのアカウントでデータ取得に失敗したため、システムを異常終了します。")
+        sys.exit(1)
+        
+    print("✨ すべてのInstagram処理が正常終了しました。")
 
 if __name__ == "__main__":
     sys.stdout.reconfigure(line_buffering=True)
