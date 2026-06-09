@@ -48,9 +48,9 @@
             except Exception as e:
                 print(f" ⚠️ 通信エラー: @{clean_username} - {e}")
 
-            # 💡 次のアカウントへ行く前のインターバルを「10秒〜20秒の間でランダム」に延長
+            # 💡 次のアカウントへ行く前のインターバルを「15秒〜30秒の間でランダム」に延長
             # これによりスクレイピング検知の網をすり抜けます
-            interval = random.randint(10000, 20000)
+            interval = random.randint(15000, 30000)
             page.wait_for_timeout(interval)
 
         browser.close()
