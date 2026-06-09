@@ -9,7 +9,7 @@ from google.oauth2.service_account import Credentials
 from playwright.sync_api import sync_playwright
 
 def scrape_threads_to_sheets():
-    print("🚀 Threads収集プログラム（HTML属性直接抽出版）を開始しました")
+    print("🚀 Threads収集プログラム（完全汎用・1桁属性狙い撃ち版）を開始しました")
     
     # --- 1. Google Sheets APIの認証 ---
     try:
@@ -76,28 +76,40 @@ def scrape_threads_to_sheets():
                 
                 followers_num = 0
                 
-                # 💡 対策：開発者ツールで見つけた「フォロワー行のaタグ（またはその周辺）の中にある、title属性を持ったspan」を狙い撃ち
-                # 自己紹介文のテキストに引っかかることは絶対にありません
+                # 💡 対策：フォローの有無でHTML構造（aやdiv）が変わっても100%対応できる汎用ロジック
+                # 画面上の「フォロワー」という文字の直後にある、title属性を持ったspan要素をダイレクトに掴みます
                 try:
-                    # フォロワー数リンクの内部にある、title属性を持つspanを特定
-                    target_span = page.locator('a[href*="/followers"] span[title], *:has-text("フォロワー") span[title]').first
+                    # 「フォロワー」という文字が書かれた要素の直近にある [title] 属性持ちのspanを探す
+                    target_span = page.locator('span:has-text("フォロワー") ~ span[title], span:has-text("followers") ~ span[title], span[title]:has-text("万"), span[title]:has-text("人")').first
                     
-                    if target_span.is_visible():
-                        title_value = target_span.get_attribute("title") # 例: "12,001" を取得
-                        print(f"  🎯 HTML属性から1桁生データを検知: title=\"{title_value}\"")
+                    # 上記で取れない場合、ページ内のすべての「title属性を持つspan」から数字とコンマのパターンを引く（強力なバックアップ）
+                    if not target_span.is_visible():
+                        all_spans = page.locator('span[title]').all()
+                        for s in all_spans:
+                            t_val = s.get_attribute("title")
+                            # "15,936" のようにコンマと数字で構成されているtitleを発見したらそれを採用
+                            if t_val and re.match(r'^[\d,]+$', t_val.strip()):
+                                title_value = t_val
+                                followers_num = int(title_value.replace(",", "").strip())
+                                print(f"  🎯 汎用スキャンから生データを特定: title=\"{title_value}\"")
+                                break
+                    
+                    # 最初のロジックで綺麗に取れていた場合の処理
+                    if followers_num == 0 and target_span.is_visible():
+                        title_value = target_span.get_attribute("title")
+                        print(f"  🎯 汎用構造から1桁生データを検知: title=\"{title_value}\"")
+                        followers_num = int(title_value.replace(",", "").strip())
                         
-                        # コンマを除去してピュアな整数（int）に変換
-                        cleaned_title = title_value.replace(",", "").strip()
-                        followers_num = int(cleaned_title)
                 except Exception as inner_e:
                     print(f"  ⚠️ 属性抽出エラー(保険ロジックへ移行): {inner_e}")
                 
-                # 保険（万が一、上記で見失った場合はメタデータから引く）
+                # 保険（万が一、仕様変更で全滅した場合は裏のJSON生ソースをパースする）
                 if followers_num == 0:
                     raw_html = page.content()
                     meta_match = re.search(r'"edge_followed_by"\s*:\s*\{\s*"count"\s*:\s*(\d+)', raw_html)
                     if meta_match:
                         followers_num = int(meta_match.group(1))
+                        print(f"  ℹ️ 保険ロジック（生JSONパース）により救済: {followers_num}")
 
                 if followers_num > 0:
                     ws.append_row([now_str, clean_username, 0, followers_num, 0])
