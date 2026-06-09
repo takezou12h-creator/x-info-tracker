@@ -8,20 +8,8 @@ import gspread
 from google.oauth2.service_account import Credentials
 from playwright.sync_api import sync_playwright
 
-def extract_count_from_raw_html(html, key_name):
-    """
-    Threadsの生HTMLソースコードから特定のカウント数（例: edge_followed_by）の
-    1桁単位の生数値を正規表現で直接ぶっこ抜く関数
-    """
-    # 例: "edge_followed_by":{"count":10457} や "edge_followed_by":{"count": 10457} を狙い撃ち
-    pattern = rf'"{key_name}"\s*:\s*\{\s*"count"\s*:\s*(\d+)'
-    match = re.search(pattern, html)
-    if match:
-        return int(match.group(1))
-    return 0
-
 def scrape_threads_to_sheets():
-    print("🚀 Threads収集プログラム（生ソース直接解剖版）を開始しました")
+    print("🚀 Threads収集プログラム（HTML属性直接抽出版）を開始しました")
     
     # --- 1. Google Sheets APIの認証 ---
     try:
@@ -33,9 +21,7 @@ def scrape_threads_to_sheets():
         
         sheet_id = os.environ.get("SPREADSHEET_ID")
         sh = client.open_by_key(sheet_id)
-        
-        # 3枚目のシート
-        ws = sh.get_worksheet(2) 
+        ws = sh.get_worksheet(2) # 3枚目のシート
         print(f"🎯 スプレッドシート接続成功: {sh.title} / シート名: {ws.title}")
     except Exception as e:
         print(f"❌ Google Sheets 接続エラー: {e}")
@@ -50,23 +36,19 @@ def scrape_threads_to_sheets():
         usernames = [line.strip() for line in f if line.strip()]
     
     print(f"📋 読み込んだThreadsアカウント数: {len(usernames)} 件")
-    now_str = datetime.datetime.now().strftime("%Y-%m-%d")
+    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
     success_count = 0
     
     # --- 3. Playwright処理 ---
-    print("Step 2: Playwright を起動します...")
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        
-        # Threads専用のセッションID（Cookie）
         session_id = os.environ.get("THREADS_SESSION_ID")
         
         context = browser.new_context(
             user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         )
         
-        # ログイン状態の注入
         if session_id:
             context.add_cookies([{
                 'name': 'sessionid',
@@ -76,7 +58,7 @@ def scrape_threads_to_sheets():
                 'secure': True,
                 'httpOnly': True
             }])
-            print("🔑 ログインセッションをブラウザに注入しました。")
+            print("🔑 独自のセッションを利用してThreadsにログイン状態を注入しました。")
         else:
             print("⚠️ 警告: THREADS_SESSION_ID が未設定です。")
 
@@ -89,48 +71,43 @@ def scrape_threads_to_sheets():
             print(f"🔍 調査開始: @{clean_username}")
             
             try:
-                # ページへ移動
-                # domcontentloaded（HTML構造の読み込み完了）まででOK
-                page.goto(target_url, wait_until="domcontentloaded", timeout=30000)
-                page.wait_for_timeout(4000)
+                page.goto(target_url, wait_until="networkidle", timeout=30000)
+                page.wait_for_timeout(5000)
                 
-                # 画面の表示文字ではなく、裏にある「生HTMLソース」を丸ごと取得
-                raw_html = page.content()
+                followers_num = 0
                 
-                # 💡 HTML内の JSONデータからダイレクトに1桁単位の生数値を抽出
-                # マーケティング上重要なフォロワー数、フォロー数、投稿数を取得
-                followers_num = extract_count_from_raw_html(raw_html, "edge_followed_by")
-                following_num = extract_count_from_raw_html(raw_html, "edge_follow")
-                posts_num = extract_count_from_raw_html(raw_html, "edge_owner_to_timeline_media")
-
-                # もしうまく取れない場合の保険（一般用メタテキストからの抽出）
+                # 💡 対策：開発者ツールで見つけた「フォロワー行のaタグ（またはその周辺）の中にある、title属性を持ったspan」を狙い撃ち
+                # 自己紹介文のテキストに引っかかることは絶対にありません
+                try:
+                    # フォロワー数リンクの内部にある、title属性を持つspanを特定
+                    target_span = page.locator('a[href*="/followers"] span[title], *:has-text("フォロワー") span[title]').first
+                    
+                    if target_span.is_visible():
+                        title_value = target_span.get_attribute("title") # 例: "12,001" を取得
+                        print(f"  🎯 HTML属性から1桁生データを検知: title=\"{title_value}\"")
+                        
+                        # コンマを除去してピュアな整数（int）に変換
+                        cleaned_title = title_value.replace(",", "").strip()
+                        followers_num = int(cleaned_title)
+                except Exception as inner_e:
+                    print(f"  ⚠️ 属性抽出エラー(保険ロジックへ移行): {inner_e}")
+                
+                # 保険（万が一、上記で見失った場合はメタデータから引く）
                 if followers_num == 0:
-                    try:
-                        # 例: <meta property="og:description" content="10.4k Followers, ..."/>
-                        meta_text = page.locator('meta[property="og:description"]').get_attribute("content")
-                        if meta_text:
-                            print(f" ℹ️ メタデータから抽出を試みます: {meta_text}")
-                            match = re.search(r'([\d.,万KM]+)\s*Followers', meta_text, re.IGNORECASE)
-                            if match:
-                                # 簡易的な変換（丸められた数値になります）
-                                val = match.group(1).replace(',', '')
-                                if '万' in val: followers_num = int(float(val.replace('万', '')) * 10000)
-                                elif 'K' in val: followers_num = int(float(val.replace('K', '')) * 1000)
-                                else: followers_num = int(val)
-                    except:
-                        pass
+                    raw_html = page.content()
+                    meta_match = re.search(r'"edge_followed_by"\s*:\s*\{\s*"count"\s*:\s*(\d+)', raw_html)
+                    if meta_match:
+                        followers_num = int(meta_match.group(1))
 
-                # スプレッドシートに追記（int型で渡すことでコンマなしの綺麗な数値になります）
-                if followers_num > 0 or following_num > 0:
-                    # 3枚目のシートへ追記
-                    ws.append_row([now_str, clean_username, following_num, followers_num, posts_num])
-                    print(f" ✅ Success: {clean_username} (Followers: {followers_num:,}, Following: {following_num:,}, Posts: {posts_num:,})")
+                if followers_num > 0:
+                    ws.append_row([now_str, clean_username, 0, followers_num, 0])
+                    print(f" ✅ Success: {clean_username} (フォロワー: {followers_num})")
                     success_count += 1
                 else:
-                    print(f" ❌ Failed: {clean_username} (生HTML内に数値が見つかりませんでした)")
+                    print(f" ❌ Failed: {clean_username} (1桁数値の特定に失敗しました)")
 
             except Exception as e:
-                print(f" ⚠️ 解析エラー: @{clean_username} - {e}")
+                print(f" ⚠️ 通信エラー: @{clean_username} - {e}")
 
             page.wait_for_timeout(random.randint(4000, 7000))
 
@@ -138,7 +115,6 @@ def scrape_threads_to_sheets():
         
     # --- 4. 運行チェック（エラー通知用） ---
     print(f"🏁 処理完了: {success_count} / {len(usernames)} 件の取得に成功しました。")
-    
     if success_count == 0 and len(usernames) > 0:
         print("❌ 致命的エラー: 全てのアカウントでデータ取得に失敗したため、システムを異常終了します。")
         sys.exit(1)
