@@ -59,14 +59,14 @@ def scrape_threads_to_sheets():
         usernames = [line.strip() for line in f if line.strip()]
     
     print(f"📋 読み込んだThreadsアカウント数: {len(usernames)} 件")
-    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now_str = datetime.datetime.now().strftime("%Y-%m-%d")
     
     # --- 3. Playwright処理 ---
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         
-        # 💡 InstagramのセッションIDをそのまま流用します
-        session_id = os.environ.get("INSTAGRAM_SESSION_ID")
+        # 💡 ThreadsのセッションIDをそのまま流用します
+        session_id = os.environ.get("THREADS_SESSION_ID")
         
         context = browser.new_context(
             user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -82,9 +82,9 @@ def scrape_threads_to_sheets():
                 'secure': True,
                 'httpOnly': True
             }])
-            print("🔑 Instagramのセッションを利用してThreadsにログイン状態を注入しました。")
+            print("🔑 Threadsのセッションを利用してThreadsにログイン状態を注入しました。")
         else:
-            print("⚠️ 警告: INSTAGRAM_SESSION_ID が未設定です。")
+            print("⚠️ 警告: THREADS_SESSION_ID が未設定です。")
 
         page = context.new_page()
 
