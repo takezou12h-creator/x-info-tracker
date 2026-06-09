@@ -1,9 +1,9 @@
 name: Daily Threads Scraper
 
 on:
-  #schedule:
+  schedule:
     # 毎日21:00 UTC（日本時間の翌朝6:00）に自動実行
-    #- cron: '0 21 * * *'
+    - cron: '00 20 * * *'
   workflow_dispatch: # 手動実行ボタン
 
 jobs:
