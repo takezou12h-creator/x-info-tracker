@@ -72,7 +72,9 @@ def scrape_instagram_to_sheets():
         usernames = [line.strip() for line in f if line.strip()]
     
     print(f"📋 読み込んだInstagramアカウント数: {len(usernames)} 件")
-    now_str = datetime.datetime.now().strftime("%Y-%m-%d") # 💡 日付フォーマットを完全統一
+    
+    # 💡 日付フォーマットを完全統一 (YYYY-MM-DD)
+    now_str = datetime.datetime.now().strftime("%Y-%m-%d")
     
     # 成功件数をトラックする変数
     success_count = 0
@@ -119,7 +121,7 @@ def scrape_instagram_to_sheets():
                 raw_following = "0"
                 raw_posts = "0"
                 
-                # 💡 復活部分：画面上の要素から文字列を確実に抽出
+                # 画面上の要素から文字列を確実に抽出
                 try:
                     followers_element = page.locator('a[href*="/followers/"], span:has-text("followers"), span:has-text("フォロワー")').first
                     if followers_element.is_visible():
@@ -150,4 +152,29 @@ def scrape_instagram_to_sheets():
                 if followers_num > 0 or following_num > 0:
                     ws.append_row([now_str, clean_username, following_num, followers_num, posts_num])
                     print(f" ✅ Success: {clean_username} (フォロワー: {followers_num}, フォロー中: {following_num}, 投稿: {posts_num})")
-                    success_count
+                    success_count += 1
+                else:
+                    print(f" ❌ Failed: {clean_username} (画面上の数値を特定できませんでした)")
+
+            except Exception as e:
+                print(f" ⚠️ 通信エラー: @{clean_username} - {e}")
+
+            # 💡 【完全復活】次のアカウントへ行く前のインターバルを「15秒〜30秒の間でランダム」に確保
+            interval = random.randint(15000, 30000)
+            print(f" ⏳ ロボット検知回避のため、次のリクエストまで {interval / 1000:.1f} 秒待機します...")
+            page.wait_for_timeout(interval)
+
+        browser.close()
+        
+    # --- 4. 運行チェック（エラー通知連動用） ---
+    print(f"🏁 処理完了: {success_count} / {len(usernames)} 件の取得に成功しました。")
+    
+    if success_count == 0 and len(usernames) > 0:
+        print("❌ 致命的エラー: 全てのアカウントでデータ取得に失敗したため、システムを異常終了します。")
+        sys.exit(1)
+        
+    print("✨ すべてのInstagram処理が正常終了しました。")
+
+if __name__ == "__main__":
+    sys.stdout.reconfigure(line_buffering=True)
+    scrape_instagram_to_sheets()
