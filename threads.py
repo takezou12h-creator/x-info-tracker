@@ -71,52 +71,51 @@ def scrape_threads_to_sheets():
             print(f"🔍 調査開始: @{clean_username}")
             
             try:
+                # 💡 対策①: ページ移動後、ネットワーク通信が完全に落ち着くまで待つ
                 page.goto(target_url, wait_until="networkidle", timeout=30000)
-                page.wait_for_timeout(5000)
+                page.wait_for_timeout(6000) # 1件目の読み込み遅延対策として少し長めに待機
                 
                 followers_num = 0
                 
-                # 💡 対策：フォローの有無でHTML構造（aやdiv）が変わっても100%対応できる汎用ロジック
-                # 画面上の「フォロワー」という文字の直後にある、title属性を持ったspan要素をダイレクトに掴みます
+                # 1. 汎用画面属性スキャン（title属性を狙う）
                 try:
-                    # 「フォロワー」という文字が書かれた要素の直近にある [title] 属性持ちのspanを探す
                     target_span = page.locator('span:has-text("フォロワー") ~ span[title], span:has-text("followers") ~ span[title], span[title]:has-text("万"), span[title]:has-text("人")').first
                     
-                    # 上記で取れない場合、ページ内のすべての「title属性を持つspan」から数字とコンマのパターンを引く（強力なバックアップ）
-                    if not target_span.is_visible():
-                        all_spans = page.locator('span[title]').all()
-                        for s in all_spans:
-                            t_val = s.get_attribute("title")
-                            # "15,936" のようにコンマと数字で構成されているtitleを発見したらそれを採用
-                            if t_val and re.match(r'^[\d,]+$', t_val.strip()):
-                                title_value = t_val
-                                followers_num = int(title_value.replace(",", "").strip())
-                                print(f"  🎯 汎用スキャンから生データを特定: title=\"{title_value}\"")
-                                break
-                    
-                    # 最初のロジックで綺麗に取れていた場合の処理
-                    if followers_num == 0 and target_span.is_visible():
+                    if target_span.is_visible():
                         title_value = target_span.get_attribute("title")
                         print(f"  🎯 汎用構造から1桁生データを検知: title=\"{title_value}\"")
                         followers_num = int(title_value.replace(",", "").strip())
-                        
+                    else:
+                        # バックアップスキャン
+                        all_spans = page.locator('span[title]').all()
+                        for s in all_spans:
+                            t_val = s.get_attribute("title")
+                            if t_val and re.match(r'^[\d,]+$', t_val.strip()):
+                                followers_num = int(t_val.replace(",", "").strip())
+                                print(f"  🎯 汎用スキャンから生データを特定: title=\"{t_val}\"")
+                                break
                 except Exception as inner_e:
                     print(f"  ⚠️ 属性抽出エラー(保険ロジックへ移行): {inner_e}")
                 
-                # 保険（万が一、仕様変更で全滅した場合は裏のJSON生ソースをパースする）
+                # 💡 対策②: 万が一画面から取れなかった場合、裏の生HTMLソース(JSON)を直接解剖して完全救済
                 if followers_num == 0:
                     raw_html = page.content()
+                    # 1桁単位の生データをダイレクトに狙い撃ち
                     meta_match = re.search(r'"edge_followed_by"\s*:\s*\{\s*"count"\s*:\s*(\d+)', raw_html)
+                    if not meta_match:
+                        # 別パターンのJSONキー名も網羅
+                        meta_match = re.search(r'"follower_count"\s*:\s*(\d+)', raw_html)
+                        
                     if meta_match:
                         followers_num = int(meta_match.group(1))
-                        print(f"  ℹ️ 保険ロジック（生JSONパース）により救済: {followers_num}")
+                        print(f"  🔥 保険ロジック（生JSONハッキング）により1桁単位の完全救済に成功: {followers_num}")
 
                 if followers_num > 0:
                     ws.append_row([now_str, clean_username, 0, followers_num, 0])
                     print(f" ✅ Success: {clean_username} (フォロワー: {followers_num})")
                     success_count += 1
                 else:
-                    print(f" ❌ Failed: {clean_username} (1桁数値の特定に失敗しました)")
+                    print(f" ❌ Failed: {clean_username} (1桁数値の特定に失敗しました。非公開または一時的なブロックの可能性があります)")
 
             except Exception as e:
                 print(f" ⚠️ 通信エラー: @{clean_username} - {e}")
