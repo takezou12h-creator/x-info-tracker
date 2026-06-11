@@ -2,8 +2,8 @@ name: X Follower Scraper
 
 on:
   schedule:
-    # 日本時間 23:30 (UTC 14:30) に毎日実行
-    - cron: '00 20 * * *'
+    # 💡 解決策：日本時間の深夜 04:00 (UTC 前日19:00) にセット
+    - cron: '00 19 * * *'
   workflow_dispatch: # 手動実行ボタンも残しておく
 
 jobs:
