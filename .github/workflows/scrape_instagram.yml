@@ -2,9 +2,9 @@ name: Daily Instagram Scraper
 
 on:
   schedule:
-    # 毎日20:30 UTC（日本時間の翌朝5:00）に自動実行
-    - cron: '00 20 * * *'
-  workflow_dispatch: # 手動実行ボタン
+    # 💡 解決策：日本時間の深夜 04:00 (UTC 前日19:00) にセット
+    - cron: '00 19 * * *'
+  workflow_dispatch: # 手動実行ボタンも残しておく
 
 jobs:
   scrape:
