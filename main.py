@@ -10,37 +10,28 @@ from playwright.sync_api import sync_playwright
 
 def extract_count_from_text(html, target_username, keyword):
     """
-    ターゲット固有のプロフィールリンクから、ダミーやキャッシュのズレを完全に排除し、
-    本物の数値（例: 6,945）だけを1の位まで100%正確にスナイプする関数
+    ターゲット固有のプロフィールリンクの周辺を大捜索し、
+    桁数（3桁、4桁、5桁〜）やコンマの有無に関わらず、本物の数値だけを完璧に抽出する関数
     """
     try:
         url_key = keyword.lower()
         
-        if url_key == "followers":
-            # 💡 対策：未ログイン特有の verified_followers と通常の followers の両方を厳密にキャッチ
-            # href 属性の直後、または同じaタグの中に「font-bold">数字</div>」がある本物の構造だけを指定
-            pattern = rf'href="/{re.escape(target_username)}/(verified_)?followers"[^>]*>.*?font-bold">([\d,]+)</div>'
-            match = re.search(pattern, html, re.IGNORECASE | re.DOTALL)
-            if match:
-                return int(match.group(2).replace(",", "").strip())
-                
-            # 逆の並び（数字が前に来るパターン）も、直近のaタグと完全に紐づいているものだけを限定
-            pattern_rev = rf'font-bold">([\d,]+)</div>.*?href="/{re.escape(target_username)}/(verified_)?followers"'
-            match_rev = re.search(pattern_rev, html, re.IGNORECASE | re.DOTALL)
-            if match_rev:
-                return int(match_rev.group(1).replace(",", "").strip())
-        else:
-            # Following（フォロー中）の厳密スナイプ
-            pattern = rf'href="/{re.escape(target_username)}/following"[^>]*>.*?font-bold">([\d,]+)</div>'
-            match = re.search(pattern, html, re.IGNORECASE | re.DOTALL)
-            if match:
-                return int(match.group(1).replace(",", "").strip())
-                
-            pattern_rev = rf'font-bold">([\d,]+)</div>.*?href="/{re.escape(target_username)}/following"'
-            match_rev = re.search(pattern_rev, html, re.IGNORECASE | re.DOTALL)
-            if match_rev:
-                return int(match_rev.group(1).replace(",", "").strip())
-                
+        # 💡 桁数・コンマの有無を完全に無視して「数字とコンマの塊」を引っ張る最強のパターン
+        # ターゲットの href 属性を持つaタグの開始から終了（または直近のdiv）の中にある数値を狙い撃ち
+        pattern = rf'href="/{re.escape(target_username)}/{url_key}"[^>]*>.*?font-bold">([0-9\.,]+)</div>'
+        match = re.search(pattern, html, re.IGNORECASE | re.DOTALL)
+        if match:
+            # コンマを除去して純粋な整数にする
+            cleaned_num = match.group(1).replace(",", "").replace(".", "").strip()
+            return int(cleaned_num)
+            
+        # 逆並び（数字の後にhrefが来るパターン）も、直近のaタグと連動しているものだけを厳密に指定
+        pattern_rev = rf'font-bold">([0-9\.,]+)</div>.*?href="/{re.escape(target_username)}/{url_key}"'
+        match_rev = re.search(pattern_rev, html, re.IGNORECASE | re.DOTALL)
+        if match_rev:
+            cleaned_num = match_rev.group(1).replace(",", "").replace(".", "").strip()
+            return int(cleaned_num)
+            
     except Exception as e:
         print(f"  ⚠️ テキスト解析中に微細なエラー: {e}")
     return 0
@@ -60,7 +51,7 @@ def extract_posts_count(html):
     return 0
 
 def scrape_to_sheets():
-    print("🚀 X(Twitter)データ収集プログラム（完全一致・スナイパー版）を開始しました")
+    print("🚀 X(Twitter)データ収集プログラム（全桁数・完全対応版）を開始しました")
     
     # --- 1. Google Sheets APIの認証 ---
     try:
@@ -113,7 +104,7 @@ def scrape_to_sheets():
                 
                 raw_html = page.content()
                 
-                # ガチガチに固定した正規表現で抽出を実行
+                # 桁数フリーの新しい抽出ロジックを実行
                 followers_num = extract_count_from_text(raw_html, clean_username, "Followers")
                 following_num = extract_count_from_text(raw_html, clean_username, "Following")
                 posts_num = extract_posts_count(raw_html)
@@ -123,7 +114,7 @@ def scrape_to_sheets():
                     print(f" ✅ Success: {clean_username} (Followers: {followers_num:,}, Following: {following_num:,}, Posts: {posts_num:,})")
                     success_count += 1
                 else:
-                    print(f" ❌ Failed: {clean_username} (本物の数値エリアを特定できませんでした)")
+                    print(f" ❌ Failed: {clean_username} (指定の桁数の数値を特定できませんでした)")
 
             except Exception as e:
                 print(f" ⚠️ 通信エラーまたはタイムアウト: @{clean_username} - {e}")
