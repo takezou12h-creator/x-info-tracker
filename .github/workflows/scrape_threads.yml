@@ -2,9 +2,9 @@ name: Daily Threads Scraper
 
 on:
   schedule:
-    # 毎日21:00 UTC（日本時間の翌朝6:00）に自動実行
-    - cron: '00 20 * * *'
-  workflow_dispatch: # 手動実行ボタン
+    # 💡 解決策：日本時間の深夜 04:30 (UTC 前日19:30) にセット
+    - cron: '30 19 * * *'
+  workflow_dispatch: # 手動実行ボタンも残しておく
 
 jobs:
   scrape:
