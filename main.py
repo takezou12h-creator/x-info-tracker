@@ -7,6 +7,7 @@ import re
 import gspread
 from google.oauth2.service_account import Credentials
 from playwright.sync_api import sync_playwright
+import pprint
 
 def extract_x_profile_data(html, target_username):
     """
@@ -16,7 +17,7 @@ def extract_x_profile_data(html, target_username):
     
     # 🔍 【検証1】そもそもHTMLの文字数がどれくらいあるかチェック
     print(f"  [DEBUG] 取得したHTMLの総文字数: {len(html)} 文字")
-    
+    pprint.pprint(html)
     try:
         # 1. INITIAL_STATE のテキスト抽出テスト
         state_match = re.search(r'window\.__INITIAL_STATE__\s*=\s*(\{.*?\});', html, re.DOTALL)
