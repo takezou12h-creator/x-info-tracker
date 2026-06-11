@@ -8,27 +8,31 @@ import gspread
 from google.oauth2.service_account import Credentials
 from playwright.sync_api import sync_playwright
 
-def extract_count_from_text(html, keyword):
+def extract_count_from_text(html, target_username, keyword):
     """
-    HTML内のテキストから、Following や Followers の直前にある
-    コンマ付きの数値（例: 6,945）を正確に抜き出す関数
+    ターゲット固有のリンクURL（例: href="/username/followers"）のすぐ傍にある
+    1桁単位の正確なコンマ付き数値だけをピンポイントで強奪する関数（700の罠を完全回避）
     """
     try:
-        # 例: >6,945</div><div[^>]*>Followers を狙い撃ちする最高精度の正規表現
-        pattern = rf'font-bold">([\d,]+)</div>[^<]*<div[^>]*>{keyword}</div>'
+        # 検索するキーワード（Followersなら followers、Followingなら following）
+        url_key = keyword.lower()
+        
+        # 💡 対策：href="/ユーザー名/followers" というリンク構造の中、または直前にある数字だけを狙う
+        # 例: href="/nikudan_diet/followers"><div...>6,945</div> のような並びを正確にキャッチ
+        pattern = rf'href="/{re.escape(target_username)}/{url_key}".*?font-bold">([\d,]+)</div>'
         match = re.search(pattern, html, re.IGNORECASE | re.DOTALL)
+        
         if match:
-            # コンマを消して整数に変換
             cleaned_num = match.group(1).replace(",", "").strip()
             return int(cleaned_num)
             
-        # 保険パターン：さらに広い範囲で検索
-        pattern_fallback = rf'([\d,]+)[^<]*{keyword}'
-        match_fb = re.search(pattern_fallback, html, re.IGNORECASE)
-        if match_fb:
-            cleaned_num = match_fb.group(1).replace(",", "").strip()
-            if cleaned_num.isdigit():
-                return int(cleaned_num)
+        # パターンB: 数字がリンクの「前」にある構造もカバー
+        pattern_reverse = rf'font-bold">([\d,]+)</div>.*?href="/{re.escape(target_username)}/{url_key}"'
+        match_rev = re.search(pattern_reverse, html, re.IGNORECASE | re.DOTALL)
+        if match_rev:
+            cleaned_num = match_rev.group(1).replace(",", "").strip()
+            return int(cleaned_num)
+            
     except Exception as e:
         print(f"  ⚠️ テキスト解析中に微細なエラー: {e}")
     return 0
@@ -48,7 +52,7 @@ def extract_posts_count(html):
     return 0
 
 def scrape_to_sheets():
-    print("🚀 X(Twitter)データ収集プログラム（HTMLダイレクト奪取版）を開始しました")
+    print("🚀 X(Twitter)データ収集プログラム（偽物トラップ完全解除版）を開始しました")
     
     # --- 1. Google Sheets APIの認証 ---
     try:
@@ -95,15 +99,14 @@ def scrape_to_sheets():
             print(f"🔍 調査開始: @{clean_username}")
             
             try:
-                # 通信が完全に落ち着くまで待つ
                 page.goto(f"https://x.com/{clean_username}", wait_until="networkidle", timeout=30000)
-                page.wait_for_timeout(5000)
+                page.wait_for_timeout(6000) # 1件ずつの読み込みをさらに手厚く待機
                 
                 raw_html = page.content()
                 
-                # 💡 発見したリンクエリアの剥き出し文字から数値を直接抽出
-                followers_num = extract_count_from_text(raw_html, "Followers")
-                following_num = extract_count_from_text(raw_html, "Following")
+                # 💡 各アカウント名を引数に渡して、その人のリンクだけを厳密に探索
+                followers_num = extract_count_from_text(raw_html, clean_username, "Followers")
+                following_num = extract_count_from_text(raw_html, clean_username, "Following")
                 posts_num = extract_posts_count(raw_html)
 
                 if followers_num > 0 or following_num > 0:
@@ -111,7 +114,7 @@ def scrape_to_sheets():
                     print(f" ✅ Success: {clean_username} (Followers: {followers_num:,}, Following: {following_num:,}, Posts: {posts_num:,})")
                     success_count += 1
                 else:
-                    print(f" ❌ Failed: {clean_username} (画面上の数値を特定できませんでした)")
+                    print(f" ❌ Failed: {clean_username} (固有のプロフィールURLから数値を特定できませんでした)")
 
             except Exception as e:
                 print(f" ⚠️ 通信エラーまたはタイムアウト: @{clean_username} - {e}")
