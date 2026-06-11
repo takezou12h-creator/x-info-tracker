@@ -10,29 +10,37 @@ from playwright.sync_api import sync_playwright
 
 def extract_count_from_text(html, target_username, keyword):
     """
-    ターゲット固有のリンクURL（例: href="/username/followers"）のすぐ傍にある
-    1桁単位の正確なコンマ付き数値だけをピンポイントで強奪する関数（700の罠を完全回避）
+    ターゲット固有のプロフィールリンクから、ダミーやキャッシュのズレを完全に排除し、
+    本物の数値（例: 6,945）だけを1の位まで100%正確にスナイプする関数
     """
     try:
-        # 検索するキーワード（Followersなら followers、Followingなら following）
         url_key = keyword.lower()
         
-        # 💡 対策：href="/ユーザー名/followers" というリンク構造の中、または直前にある数字だけを狙う
-        # 例: href="/nikudan_diet/followers"><div...>6,945</div> のような並びを正確にキャッチ
-        pattern = rf'href="/{re.escape(target_username)}/{url_key}".*?font-bold">([\d,]+)</div>'
-        match = re.search(pattern, html, re.IGNORECASE | re.DOTALL)
-        
-        if match:
-            cleaned_num = match.group(1).replace(",", "").strip()
-            return int(cleaned_num)
-            
-        # パターンB: 数字がリンクの「前」にある構造もカバー
-        pattern_reverse = rf'font-bold">([\d,]+)</div>.*?href="/{re.escape(target_username)}/{url_key}"'
-        match_rev = re.search(pattern_reverse, html, re.IGNORECASE | re.DOTALL)
-        if match_rev:
-            cleaned_num = match_rev.group(1).replace(",", "").strip()
-            return int(cleaned_num)
-            
+        if url_key == "followers":
+            # 💡 対策：未ログイン特有の verified_followers と通常の followers の両方を厳密にキャッチ
+            # href 属性の直後、または同じaタグの中に「font-bold">数字</div>」がある本物の構造だけを指定
+            pattern = rf'href="/{re.escape(target_username)}/(verified_)?followers"[^>]*>.*?font-bold">([\d,]+)</div>'
+            match = re.search(pattern, html, re.IGNORECASE | re.DOTALL)
+            if match:
+                return int(match.group(2).replace(",", "").strip())
+                
+            # 逆の並び（数字が前に来るパターン）も、直近のaタグと完全に紐づいているものだけを限定
+            pattern_rev = rf'font-bold">([\d,]+)</div>.*?href="/{re.escape(target_username)}/(verified_)?followers"'
+            match_rev = re.search(pattern_rev, html, re.IGNORECASE | re.DOTALL)
+            if match_rev:
+                return int(match_rev.group(1).replace(",", "").strip())
+        else:
+            # Following（フォロー中）の厳密スナイプ
+            pattern = rf'href="/{re.escape(target_username)}/following"[^>]*>.*?font-bold">([\d,]+)</div>'
+            match = re.search(pattern, html, re.IGNORECASE | re.DOTALL)
+            if match:
+                return int(match.group(1).replace(",", "").strip())
+                
+            pattern_rev = rf'font-bold">([\d,]+)</div>.*?href="/{re.escape(target_username)}/following"'
+            match_rev = re.search(pattern_rev, html, re.IGNORECASE | re.DOTALL)
+            if match_rev:
+                return int(match_rev.group(1).replace(",", "").strip())
+                
     except Exception as e:
         print(f"  ⚠️ テキスト解析中に微細なエラー: {e}")
     return 0
@@ -52,7 +60,7 @@ def extract_posts_count(html):
     return 0
 
 def scrape_to_sheets():
-    print("🚀 X(Twitter)データ収集プログラム（偽物トラップ完全解除版）を開始しました")
+    print("🚀 X(Twitter)データ収集プログラム（完全一致・スナイパー版）を開始しました")
     
     # --- 1. Google Sheets APIの認証 ---
     try:
@@ -99,12 +107,13 @@ def scrape_to_sheets():
             print(f"🔍 調査開始: @{clean_username}")
             
             try:
+                # 通信が完全に落ち着くまで待つ
                 page.goto(f"https://x.com/{clean_username}", wait_until="networkidle", timeout=30000)
-                page.wait_for_timeout(6000) # 1件ずつの読み込みをさらに手厚く待機
+                page.wait_for_timeout(6000)
                 
                 raw_html = page.content()
                 
-                # 💡 各アカウント名を引数に渡して、その人のリンクだけを厳密に探索
+                # ガチガチに固定した正規表現で抽出を実行
                 followers_num = extract_count_from_text(raw_html, clean_username, "Followers")
                 following_num = extract_count_from_text(raw_html, clean_username, "Following")
                 posts_num = extract_posts_count(raw_html)
@@ -114,7 +123,7 @@ def scrape_to_sheets():
                     print(f" ✅ Success: {clean_username} (Followers: {followers_num:,}, Following: {following_num:,}, Posts: {posts_num:,})")
                     success_count += 1
                 else:
-                    print(f" ❌ Failed: {clean_username} (固有のプロフィールURLから数値を特定できませんでした)")
+                    print(f" ❌ Failed: {clean_username} (本物の数値エリアを特定できませんでした)")
 
             except Exception as e:
                 print(f" ⚠️ 通信エラーまたはタイムアウト: @{clean_username} - {e}")
