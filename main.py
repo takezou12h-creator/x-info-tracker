@@ -10,55 +10,83 @@ from playwright.sync_api import sync_playwright
 
 def extract_x_profile_data(html, target_username):
     """
-    提供された最新のXのHTMLから window.__INITIAL_STATE__ を検出し、
-    指定されたユーザーの1桁単位の正確な生データを辞書型でぶっこ抜く関数
+    HTMLを徹底解剖し、進捗をすべてprint出力して原因を特定するデバッグ関数
     """
     profile_data = {"followers": 0, "following": 0, "posts": 0}
     
+    # 🔍 【検証1】そもそもHTMLの文字数がどれくらいあるかチェック
+    print(f"  [DEBUG] 取得したHTMLの総文字数: {len(html)} 文字")
+    
     try:
-        # 1. HTML内から window.__INITIAL_STATE__ = { ... }; の中身を抽出
+        # 1. INITIAL_STATE のテキスト抽出テスト
         state_match = re.search(r'window\.__INITIAL_STATE__\s*=\s*(\{.*?\});', html, re.DOTALL)
         if not state_match:
-            # 別の記述パターン（スペースなし等）もカバー
             state_match = re.search(r'__INITIAL_STATE__\s*=\s*(\{.*?\});', html, re.DOTALL)
             
-        if state_match:
+        if not state_match:
+            print("  [DEBUG] ❌ 致命的: HTML内から 'window.__INITIAL_STATE__' の文字列を検出できませんでした。")
+        else:
             json_text = state_match.group(1)
-            # JSONとしてPythonで扱えるようにロード
-            state_data = json.loads(json_text)
+            print(f"  [DEBUG] ⭕️ INITIAL_STATEの文字列を検出 (頭50文字): {json_text[:50]}...")
             
-            # 最新のHTML構造の users -> entities の中を大捜索
-            users_entities = state_data.get("entities", {}).get("users", {}).get("entities", {})
-            
-            # 隠されているユーザーデータの中から、screen_name がターゲットと一致するものを特定
-            for user_id, user_info in users_entities.items():
-                screen_name = user_info.get("screen_name", "").lower()
+            # JSON変換テスト
+            try:
+                state_data = json.loads(json_text)
+                print("  [DEBUG] ⭕️ JSONのパース（辞書型への変換）に成功しました。")
                 
-                if screen_name == target_username.lower():
-                    # 1桁単位のリアルな生数値をダイレクトに奪取！
-                    profile_data["followers"] = int(user_info.get("followers_count", 0))
-                    profile_data["following"] = int(user_info.get("friends_count", 0))
-                    profile_data["posts"] = int(user_info.get("statuses_count", 0))
-                    print(f"  🔥 最新のINITIAL_STATEのデコードに成功しました。内部ID: {user_id}")
-                    return profile_data
+                # 階層の掘り下げテスト
+                entities = state_data.get("entities", {})
+                users = entities.get("users", {})
+                users_entities = users.get("entities", {})
+                
+                print(f"  [DEBUG] entities内にあるユーザーデータの件数: {len(users_entities)} 件")
+                
+                if len(users_entities) > 0:
+                    print(f"  [DEBUG] 内部に存在するアカウントID一覧: {list(users_entities.keys())}")
                     
-        # 2. 【バックアップ保険】もし上記で見つからなかった場合、文字列から直接力技で探す
-        if profile_data["followers"] == 0:
-            f_match = re.search(r'"screen_name"\s*:\s*"' + re.escape(target_username) + r'".*?"followers_count"\s*:\s*(\d+)', html, re.IGNORECASE | re.DOTALL)
+                    # ターゲットの一致確認
+                    found_flag = False
+                    for user_id, user_info in users_entities.items():
+                        screen_name = user_info.get("screen_name", "")
+                        print(f"    - 見つかったアカウント: @{screen_name} (ID: {user_id})")
+                        
+                        if screen_name.lower() == target_username.lower():
+                            profile_data["followers"] = int(user_info.get("followers_count", 0))
+                            profile_data["following"] = int(user_info.get("friends_count", 0))
+                            profile_data["posts"] = int(user_info.get("statuses_count", 0))
+                            print(f"    🌟 一致するターゲットを発見! -> フォロワー: {profile_data['followers']}")
+                            found_flag = True
+                            return profile_data
+                    
+                    if not found_flag:
+                        print(f"  [DEBUG] ❌ ロードされたユーザーデータの中に、探している @{target_username} は含まれていませんでした。")
+                else:
+                    print("  [DEBUG] ⚠️ users -> entities の中身が空っぽです。未ログイン制限の可能性があります。")
+                    
+            except Exception as json_e:
+                print(f"  [DEBUG] ❌ JSONデコードエラー: {json_e}")
+
+        # 2. 力技の文字列検索（正規表現）テスト
+        print("  [DEBUG] 🔄 保険ロジック（文字列からの直接検索）をテストします...")
+        f_match = re.search(r'"screen_name"\s*:\s*"' + re.escape(target_username) + r'".*?"followers_count"\s*:\s*(\d+)', html, re.IGNORECASE | re.DOTALL)
+        if f_match:
+            print(f"  [DEBUG] ⭕️ 文字列からフォロワー数を発見: {f_match.group(1)}")
+            profile_data["followers"] = int(f_match.group(1))
+            
             g_match = re.search(r'"screen_name"\s*:\s*"' + re.escape(target_username) + r'".*?"friends_count"\s*:\s*(\d+)', html, re.IGNORECASE | re.DOTALL)
             p_match = re.search(r'"screen_name"\s*:\s*"' + re.escape(target_username) + r'".*?"statuses_count"\s*:\s*(\d+)', html, re.IGNORECASE | re.DOTALL)
-            
-            if f_match: profile_data["followers"] = int(f_match.group(1))
             if g_match: profile_data["following"] = int(g_match.group(1))
             if p_match: profile_data["posts"] = int(p_match.group(1))
+        else:
+            print(f"  [DEBUG] ❌ 文字列検索でも @{target_username} のデータは見つかりませんでした。")
             
     except Exception as e:
-        print(f"  ⚠️ HTMLデータのハッキング中にエラーが発生しました: {e}")
+        print(f"  [DEBUG] ❌ デバッグ中に予期せぬ例外: {e}")
         
     return profile_data
 
 def scrape_to_sheets():
-    print("🚀 X(Twitter)データ収集プログラム（完全汎用・JSON解剖版）を開始しました")
+    print("🚀 Xデータ収集プログラム（検証デバッグ版）を開始しました")
     
     # --- 1. Google Sheets APIの認証 ---
     try:
@@ -85,34 +113,32 @@ def scrape_to_sheets():
         usernames = [line.strip() for line in f if line.strip()]
     
     print(f"📋 読み込んだアカウント数: {len(usernames)} 件")
-    
-    # 日付フォーマットの完全統一 (YYYY-MM-DD)
     now_str = datetime.datetime.now().strftime("%Y-%m-%d")
     
     success_count = 0
     
     # --- 3. Xのスクレイピング処理 ---
-    print("Step 2: Playwright を起動します...")
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
+        # ステルス性を最大にするために少し偽装を追加
         context = browser.new_context(
-            user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            viewport={"width": 1280, "height": 800}
         )
         page = context.new_page()
 
         for username in usernames:
             clean_username = username.strip().replace("@", "")
-            print(f"🔍 調査開始: @{clean_username}")
+            print(f"\n🔍 調査開始: @{clean_username}")
             
             try:
-                # ページへ移動してHTMLソースの生成を待つ
-                page.goto(f"https://x.com/{clean_username}", wait_until="domcontentloaded", timeout=30000)
-                page.wait_for_timeout(5000) # 生成時間を十分に確保
+                # domcontentloaded より確実な networkidle（通信が完全に落ち着くまで）を試す
+                page.goto(f"https://x.com/{clean_username}", wait_until="networkidle", timeout=30000)
+                page.wait_for_timeout(5000)
                 
-                # 裏にある「生HTMLソース」を取得
                 raw_html = page.content()
                 
-                # 💡 対策：抽出ロジックを最新のJSON構造に完全変更
+                # デバッグ解析の実行
                 data = extract_x_profile_data(raw_html, clean_username)
                 
                 followers_num = data["followers"]
@@ -120,28 +146,22 @@ def scrape_to_sheets():
                 posts_num = data["posts"]
 
                 if followers_num > 0 or following_num > 0:
-                    # スプレッドシートに追記
                     ws.append_row([now_str, clean_username, following_num, followers_num, posts_num])
-                    print(f" ✅ Success: {clean_username} (Followers: {followers_num:,}, Following: {following_num:,}, Posts: {posts_num:,})")
+                    print(f" ✅ Success: {clean_username} (Followers: {followers_num:,})")
                     success_count += 1
                 else:
-                    print(f" ❌ Failed: {clean_username} (生HTML内のデータ構造から数値を特定できませんでした)")
+                    print(f" ❌ Failed: {clean_username}")
 
             except Exception as e:
-                print(f" ⚠️ 解析エラー: @{clean_username} - {e}")
+                print(f" ⚠️ 通信エラーまたはタイムアウト: @{clean_username} - {e}")
 
             page.wait_for_timeout(random.randint(3000, 6000))
 
         browser.close()
         
-    # --- 4. 運行チェック（エラー通知連動用） ---
-    print(f"🏁 処理完了: {success_count} / {len(usernames)} 件の取得に成功しました。")
-    
-    if success_count == 0 and len(usernames) > 0:
-        print("❌ 致命的エラー: 全てのアカウントでデータ取得に失敗したため、システムを異常終了します。")
+    print(f"\n🏁 処理完了: {success_count} / {len(usernames)} 件成功")
+    if success_count == 0:
         sys.exit(1)
-        
-    print("✨ すべてのXデータ処理が正常終了しました。")
 
 if __name__ == "__main__":
     sys.stdout.reconfigure(line_buffering=True)
