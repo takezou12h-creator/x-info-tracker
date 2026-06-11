@@ -9,8 +9,8 @@ from google.oauth2.service_account import Credentials
 from playwright.sync_api import sync_playwright
 
 def extract_count_from_html(html, key_name):
-    """HTMLソースから特定のカウント数（例: followers_count）の数値を正確に抜き出す関数"""
-    # 例: "followers_count":78841 や "followers_count": 78841 を狙い撃ち
+    """Xの生HTMLソースコードから特定のカウント数の1桁生数値をダイレクトに抽出する関数"""
+    # 💡 コロンの後のスペースや改行に完全対応
     pattern = rf'"{key_name}"\s*:\s*(\d+)'
     match = re.search(pattern, html)
     if match:
@@ -18,7 +18,7 @@ def extract_count_from_html(html, key_name):
     return 0
 
 def scrape_to_sheets():
-    print("Step 1: プログラムを開始しました")
+    print("🚀 X(Twitter)データ収集プログラムを開始しました")
     
     # --- 1. Google Sheets APIの認証 ---
     try:
@@ -31,27 +31,27 @@ def scrape_to_sheets():
         sheet_id = os.environ.get("SPREADSHEET_ID")
         sh = client.open_by_key(sheet_id)
         ws = sh.get_worksheet(0) 
-        print(f"🎯 スプレッドシート接続成功: {sh.title} / {ws.title}")
+        print(f"🎯 スプレッドシート接続成功: {sh.title} / シート名: {ws.title}")
     except Exception as e:
         print(f"❌ Google Sheets 接続エラー: {e}")
-        sys.exit(1) # 💡 初期エラーのため、即座にエラー落ちさせて通知する
+        sys.exit(1) # 初期エラーのため異常終了させてメールを飛ばす
 
     # --- 2. ターゲットの読み込み ---
     input_csv = "targets.csv"
     if not os.path.exists(input_csv):
         print(f"❌ エラー: {input_csv} が見つかりません。")
-        sys.exit(1) # 💡 CSVファイル不在のためエラー落ち
+        sys.exit(1)
     with open(input_csv, 'r') as f:
         usernames = [line.strip() for line in f if line.strip()]
     
     print(f"📋 読み込んだアカウント数: {len(usernames)} 件")
     
+    # 💡 統一された日付フォーマット (YYYY-MM-DD)
     now_str = datetime.datetime.now().strftime("%Y-%m-%d")
     
-    # 成功件数をトラックする変数
     success_count = 0
     
-    # --- 3. Xのスクレイピング（生ソース直接解剖版） ---
+    # --- 3. Xのスクレイピング処理 ---
     print("Step 2: Playwright を起動します...")
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -64,48 +64,47 @@ def scrape_to_sheets():
             print(f"🔍 調査開始: @{username}")
             
             try:
-                # ページへ移動してHTMLソースが生成されるのを待つ
+                # ページへ移動
                 page.goto(f"https://x.com/{username}", wait_until="domcontentloaded", timeout=30000)
-                page.wait_for_timeout(4000)
+                page.wait_for_timeout(4000) # ソースコードが生成されるまで安全マージンとして待機
                 
-                # 画面の表示文字ではなく、裏にある「生HTMLソース」を丸ごと取得
+                # 生のHTMLソースを丸ごと取得
                 raw_html = page.content()
                 
-                # HTML内の INITIAL_STATE からダイレクトに数値を抽出
+                # 修正した正規表現でJSONデータをハッキング
                 followers_num = extract_count_from_html(raw_html, "followers_count")
                 following_num = extract_count_from_html(raw_html, "friends_count")
                 posts_num = extract_count_from_html(raw_html, "statuses_count")
 
-                # もしうまく取れない場合の保険（別キー名のパターン）
+                # 保険（キャメルケースの古いキー名も一応残します）
                 if followers_num == 0:
                     followers_num = extract_count_from_html(raw_html, "followersCount")
                 if following_num == 0:
                     following_num = extract_count_from_html(raw_html, "friendsCount")
 
+                # 集計成功判定
                 if followers_num > 0 or following_num > 0:
-                    # スプレッドシートに追記
                     ws.append_row([now_str, username, following_num, followers_num, posts_num])
                     print(f" ✅ Success: {username} (Followers: {followers_num:,}, Following: {following_num:,}, Posts: {posts_num:,})")
-                    success_count += 1 # 💡 成功件数を加算
+                    success_count += 1
                 else:
-                    print(f" ❌ Failed: {username} (生HTML内に数値が見つかりませんでした)")
+                    print(f" ❌ Failed: {username} (生HTML内のデータパースに失敗しました)")
 
             except Exception as e:
                 print(f" ⚠️ 解析エラー: @{username} - {e}")
 
-            page.wait_for_timeout(random.randint(2000, 4000))
+            page.wait_for_timeout(random.randint(2000, 5000))
 
         browser.close()
         
     # --- 4. 運行チェック（エラー通知連動用） ---
     print(f"🏁 処理完了: {success_count} / {len(usernames)} 件の取得に成功しました。")
     
-    # 💡 取得件数が0かつ、ターゲットが1件以上存在する場合はシステムを異常終了（エラーコード1）にする
     if success_count == 0 and len(usernames) > 0:
         print("❌ 致命的エラー: 全てのアカウントでデータ取得に失敗したため、システムを異常終了します。")
-        sys.exit(1)
+        sys.exit(1) # これによりGitHubからエラーメールが飛びます
         
-    print("✨ すべてのX処理が正常終了しました。")
+    print("✨ すべてのXデータ処理が正常終了しました。")
 
 if __name__ == "__main__":
     sys.stdout.reconfigure(line_buffering=True)
