@@ -8,50 +8,20 @@ import gspread
 from google.oauth2.service_account import Credentials
 from playwright.sync_api import sync_playwright
 
-def extract_count_from_text(html, target_username, keyword):
-    """
-    ターゲット固有のプロフィールリンクの周辺を大捜索し、
-    桁数（3桁、4桁、5桁〜）やコンマの有無に関わらず、本物の数値だけを完璧に抽出する関数
-    """
+def parse_clean_number(text_value):
+    """『6,945』や『277』のような文字列から、純粋な数値だけを抽出する安全な共通関数"""
+    if not text_value:
+        return 0
     try:
-        url_key = keyword.lower()
-        
-        # 💡 桁数・コンマの有無を完全に無視して「数字とコンマの塊」を引っ張る最強のパターン
-        # ターゲットの href 属性を持つaタグの開始から終了（または直近のdiv）の中にある数値を狙い撃ち
-        pattern = rf'href="/{re.escape(target_username)}/{url_key}"[^>]*>.*?font-bold">([0-9\.,]+)</div>'
-        match = re.search(pattern, html, re.IGNORECASE | re.DOTALL)
-        if match:
-            # コンマを除去して純粋な整数にする
-            cleaned_num = match.group(1).replace(",", "").replace(".", "").strip()
-            return int(cleaned_num)
-            
-        # 逆並び（数字の後にhrefが来るパターン）も、直近のaタグと連動しているものだけを厳密に指定
-        pattern_rev = rf'font-bold">([0-9\.,]+)</div>.*?href="/{re.escape(target_username)}/{url_key}"'
-        match_rev = re.search(pattern_rev, html, re.IGNORECASE | re.DOTALL)
-        if match_rev:
-            cleaned_num = match_rev.group(1).replace(",", "").replace(".", "").strip()
-            return int(cleaned_num)
-            
-    except Exception as e:
-        print(f"  ⚠️ テキスト解析中に微細なエラー: {e}")
-    return 0
-
-def extract_posts_count(html):
-    """HTML上部の 16.8K posts のような丸められた表記から大まかな数値を拾う関数"""
-    try:
-        match = re.search(r'([\d.,万KMkm]+)[^<]*posts', html, re.IGNORECASE)
-        if match:
-            val = match.group(1).replace(",", "").upper().strip()
-            if 'K' in val: return int(float(val.replace('K', '')) * 1000)
-            if 'M' in val: return int(float(val.replace('M', '')) * 1000000)
-            if '万' in val: return int(float(val.replace('万', '')) * 10000)
-            return int(float(val))
+        # 数字とコンマとピリオド以外をすべて消去
+        cleaned = re.sub(r'[^0-9\.,]', '', text_value)
+        cleaned = cleaned.replace(",", "").replace(".", "").strip()
+        return int(cleaned) if cleaned else 0
     except:
-        pass
-    return 0
+        return 0
 
 def scrape_to_sheets():
-    print("🚀 X(Twitter)データ収集プログラム（全桁数・完全対応版）を開始しました")
+    print("🚀 X(Twitter)データ収集プログラム（要素スナイプ・最終安定版）を開始しました")
     
     # --- 1. Google Sheets APIの認証 ---
     try:
@@ -79,9 +49,7 @@ def scrape_to_sheets():
     
     print(f"📋 読み込んだアカウント数: {len(usernames)} 件")
     
-    # 日付フォーマットの完全統一 (YYYY-MM-DD)
     now_str = datetime.datetime.now().strftime("%Y-%m-%d")
-    
     success_count = 0
     
     # --- 3. Xのスクレイピング処理 ---
@@ -97,27 +65,58 @@ def scrape_to_sheets():
             clean_username = username.strip().replace("@", "")
             print(f"🔍 調査開始: @{clean_username}")
             
+            followers_num = 0
+            following_num = 0
+            posts_num = 0
+            
             try:
-                # 通信が完全に落ち着くまで待つ
                 page.goto(f"https://x.com/{clean_username}", wait_until="networkidle", timeout=30000)
-                page.wait_for_timeout(6000)
+                page.wait_for_timeout(6000) # レンダリング完了までしっかりと待機
                 
-                raw_html = page.content()
-                
-                # 桁数フリーの新しい抽出ロジックを実行
-                followers_num = extract_count_from_text(raw_html, clean_username, "Followers")
-                following_num = extract_count_from_text(raw_html, clean_username, "Following")
-                posts_num = extract_posts_count(raw_html)
+                # 💡 新ロジック: 画面上の特定のaタグ要素（リンク）を直接捕まえにいく
+                # 1. フォロワー数（通常または認証フォロワーのリンク要素をすべてスキャン）
+                follower_elements = page.query_selector_all(f'a[href^="/{clean_username}/followers"], a[href^="/{clean_username}/verified_followers"]')
+                for elem in follower_elements:
+                    text = elem.inner_text()
+                    if text:
+                        # 内部にダミーの700が紛れ込むのを防ぐため、より詳細な「font-bold」部分があればそちらを優先
+                        bold_elem = elem.query_selector('.font-bold')
+                        val_str = bold_elem.inner_text() if bold_elem else text
+                        val = parse_clean_number(val_str)
+                        if val > 0 and val != 700:
+                            followers_num = val
+                            break
+                        elif val > 0: # 700しか見つからない場合の保険
+                            followers_num = val
 
+                # 2. フォロー中（followingのリンク要素を直接捕まえる）
+                following_element = page.query_selector(f'a[href="/{clean_username}/following"]')
+                if following_element:
+                    text = following_element.inner_text()
+                    bold_elem = following_element.query_selector('.font-bold')
+                    val_str = bold_elem.inner_text() if bold_elem else text
+                    following_num = parse_clean_number(val_str)
+
+                # 3. ポスト数（上部の件数テキストを保険として取得）
+                raw_html = page.content()
+                match = re.search(r'([\d.,万KMkm]+)[^<]*posts', raw_html, re.IGNORECASE)
+                if match:
+                    val = match.group(1).replace(",", "").upper().strip()
+                    if 'K' in val: posts_num = int(float(val.replace('K', '')) * 1000)
+                    elif 'M' in val: posts_num = int(float(val.replace('M', '')) * 1000000)
+                    elif '万' in val: posts_num = int(float(val.replace('万', '')) * 10000)
+                    else: posts_num = int(float(val))
+
+                # 最低限どちらかが取れていれば書き込み
                 if followers_num > 0 or following_num > 0:
                     ws.append_row([now_str, clean_username, following_num, followers_num, posts_num])
                     print(f" ✅ Success: {clean_username} (Followers: {followers_num:,}, Following: {following_num:,}, Posts: {posts_num:,})")
                     success_count += 1
                 else:
-                    print(f" ❌ Failed: {clean_username} (指定の桁数の数値を特定できませんでした)")
+                    print(f" ❌ Failed: {clean_username} (画面上から数値を検出できませんでした)")
 
             except Exception as e:
-                print(f" ⚠️ 通信エラーまたはタイムアウト: @{clean_username} - {e}")
+                print(f" ⚠️ エラーまたはタイムアウト: @{clean_username} - {e}")
 
             page.wait_for_timeout(random.randint(4000, 7000))
 
