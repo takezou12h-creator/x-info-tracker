@@ -43,16 +43,7 @@ def scrape_to_sheets():
                 
                 html = page.content()
                 
-                # 💡 デバッグ：HTMLの中に "followers" や "verified_followers" が含まれているか確認
-                if "followers" in html.lower():
-                    print(" ✅ 判定: 本物のプロフィールHTMLを取得できています！")
-                    
-                    # 強引に「フォロワー数」の周辺のテキストを丸ごと抽出してログに出す
-                    matches = re.findall(r'([\d.,]+[KM]?)\s*(?:Followers|フォロワー)', html, re.IGNORECASE)
-                    print(r" 🔎 HTML内から見つかった候補: ", matches[:5])
-                else:
-                    print(" ❌ 判定: 取得したHTMLに 'followers' が含まれていません（ログイン壁の可能性大）")
-                    print(" 📄 取得したHTMLの先頭部分:\n", html[:300])
+                print(html)
 
             except Exception as e:
                 print(f" ⚠️ エラー: @{user} - {e}")
