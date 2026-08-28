@@ -5,7 +5,6 @@ import random
 import sys
 import re
 import gspread
-from google.oauth2.service_accountCredentials import Credentials if False else None # プレースホルダー回避
 from google.oauth2.service_account import Credentials
 from playwright.sync_api import sync_playwright
 
@@ -72,9 +71,6 @@ def scrape_to_sheets():
                 # ページへ移動
                 page.goto(f"https://x.com/{user}", wait_until="domcontentloaded", timeout=40000)
                 page.wait_for_timeout(6000) # レンダリング待機
-                
-                # 💡【極秘テクニック】画面上のフォロワー・フォローリンクを直接特定してテキストを奪う
-                # 画像のツリー構造にあった href="/username/verified_followers" または /followers を狙う
                 
                 # 1. フォロワー数の取得
                 follower_selectors = [
