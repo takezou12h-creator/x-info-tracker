@@ -5,81 +5,31 @@ import random
 import sys
 import re
 import gspread
+from google.oauth2.service_accountCredentials import Credentials if False else None # プレースホルダー回避
 from google.oauth2.service_account import Credentials
 from playwright.sync_api import sync_playwright
 
-def extract_x_clean_metrics(html):
-    """
-    agentInteractionStatistic と interactionStatistic の両方に対応し、
-    1桁単位の生数値を確実に抜き出す関数
-    """
-    metrics = {"followers": 0, "following": 0, "posts": 0}
-    
+def parse_count(text):
+    """ '22.6K' や '6,945'、 '759' などの文字列を純粋な整数に変換 """
+    if not text:
+        return 0
+    cleaned = text.replace(",", "").upper().strip()
     try:
-        # 1. パターン: 構造化データ(application/ld+json)の探索
-        json_blocks = re.findall(r'<script type="application/ld\+json">(.*?)</script>', html, re.DOTALL)
-        for block in json_blocks:
-            try:
-                data = json.loads(block.strip())
-                # mainEntity または直下から取得
-                main_entity = data.get("mainEntity", {})
-                
-                # 複数のスタッツ格納プロパティをすべてチェック
-                stats = []
-                for key in ["interactionStatistic", "agentInteractionStatistic"]:
-                    if key in main_entity:
-                        stats.extend(main_entity.get(key, []))
-                    if key in data:
-                        stats.extend(data.get(key, []))
-                
-                for stat in stats:
-                    name = stat.get("name", "")
-                    val = int(stat.get("userInteractionCount", 0))
-                    if name == "Follows": metrics["followers"] = val
-                    elif name == "Friends": metrics["following"] = val
-                    elif name == "Tweets": metrics["posts"] = val
-                
-                if metrics["followers"] > 0 or metrics["following"] > 0:
-                    return metrics
-            except:
-                continue
-
-        # 2. パターン: HTML内の agentInteractionStatistic や数値の直接スナイプ（バックアップ）
-        # 共有いただいたツリー構造にある属性名や数値の並びをダイレクトにキャプチャ
-        f_match = re.search(r'"name"\s*:\s*"Follows"\s*,\s*"userInteractionCount"\s*:\s*(\d+)', html)
-        g_match = re.search(r'"name"\s*:\s*"Friends"\s*,\s*"userInteractionCount"\s*:\s*(\d+)', html)
-        p_match = re.search(r'"name"\s*:\s*"Tweets"\s*,\s*"userInteractionCount"\s*:\s*(\d+)', html)
-        
-        if f_match: metrics["followers"] = int(f_match.group(1))
-        if g_match: metrics["following"] = int(g_match.group(1))
-        if p_match: metrics["posts"] = int(p_match.group(1))
-
-        # 3. パターン: 画面上の要素（例: 画像の759など）を直接拾う最終保険
-        if metrics["following"] == 0:
-            # followingリンク周辺の数字を探索
-            fg_search = re.search(r'href="/[^/]+/following"[^>]*>.*?font-bold">([\d,]+)<', html, re.DOTALL)
-            if fg_search:
-                metrics["following"] = int(fg_search.group(1).replace(",", ""))
-
-        if metrics["followers"] == 0:
-            # followersリンク周辺の数字を探索
-            fo_search = re.search(r'href="/[^/]+/(verified_)?followers"[^>]*>.*?font-bold">([\d,]+[KM]?)<', html, re.DOTALL)
-            if fo_search:
-                val_str = fo_search.group(2).replace(",", "")
-                if 'K' in val_str.upper():
-                    metrics["followers"] = int(float(val_str.upper().replace('K', '')) * 1000)
-                else:
-                    metrics["followers"] = int(re.sub(r'\D', '', val_str) or 0)
-
-    except Exception as e:
-        print(f"  ⚠️ メタデータ解析エラー: {e}")
-        
-    return metrics
+        if 'K' in cleaned:
+            return int(float(cleaned.replace('K', '')) * 1000)
+        elif 'M' in cleaned:
+            return int(float(cleaned.replace('M', '')) * 1000000)
+        elif '万' in cleaned:
+            return int(float(cleaned.replace('万', '')) * 10000)
+        else:
+            return int(re.sub(r'\D', '', cleaned) or 0)
+    except:
+        return 0
 
 def scrape_to_sheets():
-    print("🚀 X(Twitter)エージェント統計対応版を開始しました")
+    print("🚀 X(Twitter) 画面要素直撃・最終完全版を開始しました")
     
-    # 認証
+    # --- 1. 認証 ---
     try:
         creds = Credentials.from_service_account_info(
             json.loads(os.environ["GCP_JSON_KEY"]), 
@@ -92,6 +42,7 @@ def scrape_to_sheets():
 
     input_csv = "targets.csv"
     if not os.path.exists(input_csv):
+        print(f"❌ targets.csv が見つかりません")
         sys.exit(1)
         
     with open(input_csv, 'r') as f:
@@ -100,6 +51,7 @@ def scrape_to_sheets():
     now_str = datetime.datetime.now().strftime("%Y-%m-%d")
     success_count = 0
     
+    # --- 2. Playwright 実行 ---
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(
@@ -111,23 +63,72 @@ def scrape_to_sheets():
         for username in usernames:
             user = username.strip().replace("@", "")
             print(f"🔍 調査中: @{user}")
+            
+            followers_num = 0
+            following_num = 0
+            posts_num = 0
+            
             try:
+                # ページへ移動
                 page.goto(f"https://x.com/{user}", wait_until="domcontentloaded", timeout=40000)
-                page.wait_for_timeout(6000) 
+                page.wait_for_timeout(6000) # レンダリング待機
                 
+                # 💡【極秘テクニック】画面上のフォロワー・フォローリンクを直接特定してテキストを奪う
+                # 画像のツリー構造にあった href="/username/verified_followers" または /followers を狙う
+                
+                # 1. フォロワー数の取得
+                follower_selectors = [
+                    f'a[href="/{user}/verified_followers"] .font-bold',
+                    f'a[href="/{user}/followers"] .font-bold',
+                    f'a[href*="/followers"] .font-bold'
+                ]
+                for sel in follower_selectors:
+                    elem = page.query_selector(sel)
+                    if elem:
+                        text = elem.inner_text()
+                        if text:
+                            followers_num = parse_count(text)
+                            if followers_num > 0:
+                                break
+                
+                # 2. フォロー数の取得
+                following_selector = f'a[href="/{user}/following"] .font-bold'
+                elem_fg = page.query_selector(following_selector)
+                if elem_fg:
+                    text_fg = elem_fg.inner_text()
+                    if text_fg:
+                        following_num = parse_count(text_fg)
+
+                # 3. ポスト数の取得（HTML全体から検索）
                 html = page.content()
-                data = extract_x_clean_metrics(html)
-                
-                if data["followers"] > 0 or data["following"] > 0:
-                    ws.append_row([now_str, user, data["following"], data["followers"], data["posts"]])
-                    print(f" ✅ Success: @{user} (F:{data['followers']:,}, Fg:{data['following']:,}, P:{data['posts']:,})")
+                match_p = re.search(r'([\d.,万KMkm]+)[^<]*posts', html, re.IGNORECASE)
+                if match_p:
+                    posts_num = parse_count(match_p.group(1))
+
+                # 万が一Playwrightの要素取得で0だった場合の保険（HTML全体からの正規表現フォールバック）
+                if followers_num == 0:
+                    match_f = re.search(r'href="/{}/(verified_)?followers"[^>]*>.*?font-bold">([^<]+)<'.format(re.escape(user)), html, re.DOTALL)
+                    if match_f:
+                        followers_num = parse_count(match_f.group(2))
+
+                if following_num == 0:
+                    match_g = re.search(r'href="/{}/following"[^>]*>.*?font-bold">([^<]+)<'.format(re.escape(user)), html, re.DOTALL)
+                    if match_g:
+                        following_num = parse_count(match_g.group(2))
+
+                # 書き込み判定
+                if followers_num > 0 or following_num > 0:
+                    ws.append_row([now_str, user, following_num, followers_num, posts_num])
+                    print(f" ✅ Success: @{user} (F:{followers_num:,}, Fg:{following_num:,}, P:{posts_num:,})")
                     success_count += 1
                 else:
-                    print(f" ❌ Failed: @{user} - 有効な数値を特定できませんでした")
+                    print(f" ❌ Failed: @{user} - 画面上の数値を特定できませんでした")
+
             except Exception as e:
                 print(f" ⚠️ エラー: @{user} - {e}")
             
             page.wait_for_timeout(random.randint(4000, 7000))
+            
         browser.close()
         
     print(f"\n🏁 処理完了: {success_count} / {len(usernames)} 件の取得に成功しました。")
