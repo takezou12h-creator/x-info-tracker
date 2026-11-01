@@ -1,37 +1,39 @@
-name: X Follower Scraper
+name: Daily SNS Follower Scraper
 
 on:
   schedule:
-    # 💡 解決策：日本時間の深夜 04:00 (UTC 前日19:00) にセット
-    - cron: '00 19 * * *'
-  workflow_dispatch: # 手動実行ボタンも残しておく
+    # 毎日 日本時間の朝 8:00 に実行（UTCの23:00） ※お好みの時間に変更してください
+    - cron: '0 23 * * *'
+  workflow_dispatch: # 手動実行ボタンを有効化
 
 jobs:
-  build:
+  scrape:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
+      - name: リポジトリのチェックアウト
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Pythonのセットアップ
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'
 
-      - name: Install dependencies
+      - name: ライブラリのインストール
         run: |
-          pip install playwright gspread google-auth
-          playwright install chromium
-          playwright install-deps chromium
+          pip install -r requirements.txt
+          playwright install --with-deps chromium
 
-      - name: Run scraper
+      - name: スクレイピング＆シート記録の実行
         env:
           GCP_JSON_KEY: ${{ secrets.GCP_JSON_KEY }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }} # 任意（設定すると自動修復が有効になります）
         run: python main.py
 
-      #- name: Upload HTML for Debug
-        #uses: actions/upload-artifact@v4
-        #with:
-          #name: x-html-source
-          #path: x_page.html
+      - name: 失敗時に取得した生データ(HTML/JSON)を保存（デバッグ用）
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: raw-scraped-data
+          path: raw_data/
+          retention-days: 3
