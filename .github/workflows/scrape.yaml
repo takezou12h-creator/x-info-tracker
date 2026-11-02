@@ -1,0 +1,39 @@
+name: Daily SNS Follower Scrape
+
+on:
+  schedule:
+    # 毎日 日本時間の朝 8:00 に実行（UTCの23:00） ※お好みの時間に変更してください
+    - cron: '0 23 * * *'
+  workflow_dispatch: # 手動実行ボタンを有効化 
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - name: リポジトリのチェックアウト
+        uses: actions/checkout@v4
+
+      - name: Pythonのセットアップ
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: ライブラリのインストール
+        run: |
+          pip install -r requirements.txt
+          playwright install --with-deps chromium
+
+      - name: スクレイピング＆シート記録の実行
+        env:
+          GCP_JSON_KEY: ${{ secrets.GCP_JSON_KEY }}
+          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }} # 任意（設定すると自動修復が有効になります）
+        run: python main.py
+
+      - name: 失敗時に取得した生データ(HTML/JSON)を保存（デバッグ用）
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: raw-scraped-data
+          path: raw_data/
+          retention-days: 3
