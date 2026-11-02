@@ -4,7 +4,7 @@ on:
   schedule:
     # 毎日 日本時間の朝 8:00 に実行（UTCの23:00） ※お好みの時間に変更してください
     - cron: '0 23 * * *'
-  workflow_dispatch: # 手動実行ボタンを有効化
+  workflow_dispatch: # 手動実行ボタンを有効化 
 
 jobs:
   scrape:
