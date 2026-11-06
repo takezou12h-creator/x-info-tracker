@@ -94,7 +94,7 @@ def extract_with_gemini(source_text, username, platform):
         データ断片:
         {snippet}
         """
-        res = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
+        res = client.models.generate_content(model="gemini-3.8-flash", contents=prompt)
         match = re.search(r'\{.*?\}', res.text, re.DOTALL)
         if match:
             return json.loads(match.group(0))
