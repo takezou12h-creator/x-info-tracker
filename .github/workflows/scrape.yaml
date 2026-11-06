@@ -1,10 +1,10 @@
-name: Daily SNS Follower Scrape
+name: Daily SNS Follower Scraper
 
 on:
   schedule:
-    # 毎日 日本時間の朝 8:00 に実行（UTCの23:00） ※お好みの時間に変更してください
+    # 毎日 日本時間の朝 8:00 に実行（UTCの23:00）
     - cron: '0 23 * * *'
-  workflow_dispatch: # 手動実行ボタンを有効化 
+  workflow_dispatch: # 手動実行ボタンを有効化
 
 jobs:
   scrape:
@@ -27,11 +27,11 @@ jobs:
         env:
           GCP_JSON_KEY: ${{ secrets.GCP_JSON_KEY }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }} # 任意（設定すると自動修復が有効になります）
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python main.py
 
-      - name: 失敗時に取得した生データ(HTML/JSON)を保存（デバッグ用）
-        if: failure()
+      - name: 取得した生データ(HTML/JSON)を常時保存（デバッグ用）
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: raw-scraped-data
