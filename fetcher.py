@@ -3,7 +3,6 @@ import json
 import time
 import random
 from playwright.sync_api import sync_playwright
-from playwright_stealth import stealth_sync
 
 RAW_DIR = "raw_data"
 
@@ -26,6 +25,7 @@ def fetch_all_targets(targets):
 
     ig_session_id = os.environ.get("INSTAGRAM_SESSION_ID", "")
     x_auth_token = os.environ.get("X_AUTH_TOKEN", "")
+    x_ct0 = os.environ.get("X_CT0", "")
 
     with sync_playwright() as p:
         browser = p.chromium.launch(
@@ -50,8 +50,6 @@ def fetch_all_targets(targets):
             print("🔑 ログインセッションをブラウザにセットしました。")
 
         page = context.new_page()
-        stealth_sync(page)
-        page.goto(url, wait_until="domcontentloaded", timeout=40000)
         captured_json = []
 
         def handle_response(response):
