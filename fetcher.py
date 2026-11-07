@@ -16,11 +16,11 @@ def fetch_all_targets(targets):
         "threads": "https://www.threads.net/@{}"
     }
 
-    # SNSごとのランダム待機時間（秒）の設定：ThreadsやXは短めにして高速化
+    # SNSごとのランダム待機時間（秒）の設定
     sleep_ranges = {
         "threads": (3.0, 6.0),
         "x": (5.0, 10.0),
-        "instagram": (20.0, 30.0)
+        "instagram": (15.0, 30.0) # Instagramは厳しめに対応
     }
 
     ig_session_id = os.environ.get("INSTAGRAM_SESSION_ID", "")
@@ -34,20 +34,32 @@ def fetch_all_targets(targets):
         )
         
         context = browser.new_context(
-            user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
             locale="ja-JP",
             viewport={"width": 1280, "height": 800}
         )
 
-        # 最初にまとめてログインCookieを注入しておく
+        # --- ログイン用セッション（Cookie）の事前注入 ---
         cookies = []
         if ig_session_id:
-            cookies.append({'name': 'sessionid', 'value': ig_session_id, 'domain': '.instagram.com', 'path': '/', 'secure': True, 'httpOnly': True})
+            cookies.append({
+                'name': 'sessionid', 'value': ig_session_id,
+                'domain': '.instagram.com', 'path': '/', 'secure': True, 'httpOnly': True
+            })
         if x_auth_token:
-            cookies.append({'name': 'auth_token', 'value': x_auth_token, 'domain': '.x.com', 'path': '/', 'secure': True, 'httpOnly': True})
+            cookies.append({
+                'name': 'auth_token', 'value': x_auth_token,
+                'domain': '.x.com', 'path': '/', 'secure': True, 'httpOnly': True
+            })
+            if x_ct0:
+                cookies.append({
+                    'name': 'ct0', 'value': x_ct0,
+                    'domain': '.x.com', 'path': '/', 'secure': True, 'httpOnly': False
+                })
+        
         if cookies:
             context.add_cookies(cookies)
-            print("🔑 ログインセッションをブラウザにセットしました。")
+            print("🔑 ログインセッション(Cookie)をブラウザにセットしました。")
 
         page = context.new_page()
         captured_json = []
@@ -69,7 +81,7 @@ def fetch_all_targets(targets):
 
             try:
                 page.goto(url, wait_until="domcontentloaded", timeout=40000)
-                page.wait_for_timeout(random.randint(4000, 7000))
+                page.wait_for_timeout(random.randint(6000, 9000))
                 html = page.content()
 
                 filepath = os.path.join(RAW_DIR, f"{platform}_{username}.json")
