@@ -13,20 +13,15 @@ def load_targets(csv_path="targets.csv"):
             parts = [p.strip().replace("@", "") for p in line.split(",")]
             if len(parts) >= 2:
                 targets.append((parts[0].lower(), parts[1]))
-            else:
-                # カンマがない従来の書き方の場合は自動的に「x」として扱う
-                targets.append(("x", parts[0]))
     return targets
 
 def main():
-    print("🚀 SNSフォロワー集計システムを開始します")
+    print("🚀 統合版 SNSフォロワー集計システムを開始します")
     targets = load_targets()
-    print(f"📋 対象アカウント数: {len(targets)}件\n")
+    print(f"📋 対象アカウント数合計: {len(targets)}件\n")
 
-    # Step 1: データの取得と保存
     saved_files = fetch_all_targets(targets)
 
-    # Step 2: 保存したデータの解析
     print("\n🔍 保存データの解析を開始します...")
     valid_results = []
     for filepath in saved_files:
@@ -35,9 +30,8 @@ def main():
             print(f"  ✅ [{res['platform'].upper()}] @{res['username']} -> フォロー:{res['following']:,} / フォロワー:{res['followers']:,} / 投稿:{res['posts']:,}")
             valid_results.append(res)
         else:
-            print(f"  ❌ [{res['platform'].upper()}] @{res['username']} -> 数値の抽出に失敗しました")
+            print(f"  ❌ [{res['platform'].upper()}] @{res['username']} -> 数値の取得に失敗しました")
 
-    # Step 3: スプレッドシートへの記録
     print("\n📊 スプレッドシートへの書き込みを開始します...")
     if valid_results:
         write_to_spreadsheet(valid_results)
