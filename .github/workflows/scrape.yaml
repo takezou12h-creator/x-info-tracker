@@ -4,11 +4,17 @@ on:
   schedule:
     # 毎日 日本時間の朝 8:00 に実行（UTCの23:00）
     - cron: '0 23 * * *'
-  workflow_dispatch: # 手動実行ボタンを有効化
+  workflow_dispatch:
 
 jobs:
   scrape:
     runs-on: ubuntu-latest
+    # 💡 ここで3つのSNSを「同時並列」で動かす指定をしています
+    strategy:
+      fail-fast: false # どれか1つのSNSがエラーになっても、他のSNSの処理は止めない設定
+      matrix:
+        platform: [threads, instagram, x]
+
     steps:
       - name: リポジトリのチェックアウト
         uses: actions/checkout@v4
@@ -23,17 +29,20 @@ jobs:
           pip install -r requirements.txt
           playwright install --with-deps chromium
 
-      - name: スクレイピング＆シート記録の実行
+      - name: スクレイピング＆シート記録の実行 (${{ matrix.platform }})
         env:
           GCP_JSON_KEY: ${{ secrets.GCP_JSON_KEY }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+          INSTAGRAM_SESSION_ID: ${{ secrets.INSTAGRAM_SESSION_ID }}
+          X_AUTH_TOKEN: ${{ secrets.X_AUTH_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        run: python main.py
+        # 💡 実行時に「どのSNSだけを担当するか」を引数で渡す
+        run: python main.py ${{ matrix.platform }}
 
       - name: 取得した生データ(HTML/JSON)を常時保存（デバッグ用）
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: raw-scraped-data
+          name: raw-scraped-data-${{ matrix.platform }}
           path: raw_data/
           retention-days: 3
