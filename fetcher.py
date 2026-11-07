@@ -16,22 +16,13 @@ def fetch_all_targets(targets):
         "threads": "https://www.threads.net/@{}"
     }
 
-    # 一般的なデスクトップブラウザのふりをするための設定
-    user_agents = [
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1.1 Safari/605.1.15",
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0"
-    ]
+    ig_session_id = os.environ.get("INSTAGRAM_SESSION_ID", "")
+    x_auth_token = os.environ.get("X_AUTH_TOKEN", "")
 
     with sync_playwright() as p:
-        # headless=True だとボット判定されやすいSNS対策として引数を追加
         browser = p.chromium.launch(
             headless=True,
-            args=[
-                "--disable-blink-features=AutomationControlled",
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-            ]
+            args=["--disable-blink-features=AutomationControlled", "--no-sandbox"]
         )
         
         for i, (platform, username) in enumerate(targets):
@@ -39,12 +30,23 @@ def fetch_all_targets(targets):
             print(f"🌐 [{i+1}/{len(targets)}] 取得中 [{platform.upper()}]: @{username}")
             
             context = browser.new_context(
-                user_agent=random.choice(user_agents),
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
                 locale="ja-JP",
-                timezone_id="Asia/Tokyo",
-                viewport={"width": 1920, "height": 1080},
-                device_scale_factor=1,
+                viewport={"width": 1280, "height": 800}
             )
+
+            # --- ログイン用セッション（Cookie）の注入 ---
+            if platform == "instagram" and ig_session_id:
+                context.add_cookies([{
+                    'name': 'sessionid', 'value': ig_session_id,
+                    'domain': '.instagram.com', 'path': '/', 'secure': True, 'httpOnly': True
+                }])
+            elif platform == "x" and x_auth_token:
+                context.add_cookies([{
+                    'name': 'auth_token', 'value': x_auth_token,
+                    'domain': '.x.com', 'path': '/', 'secure': True, 'httpOnly': True
+                }])
+
             page = context.new_page()
             captured_json = []
 
@@ -59,12 +61,9 @@ def fetch_all_targets(targets):
             page.on("response", handle_response)
 
             try:
-                # Instagramなどは少し長めにタイムアウトをとる
                 page.goto(url, wait_until="domcontentloaded", timeout=40000)
-                
-                # 人間らしくランダムに少しスクロールや待機を入れる
-                page.wait_for_timeout(random.uniform(3000, 6000))
-                
+                # ページが完全に描画されるまで少し長めに待機
+                page.wait_for_timeout(random.randint(6000, 9000))
                 html = page.content()
 
                 filepath = os.path.join(RAW_DIR, f"{platform}_{username}.json")
@@ -77,14 +76,14 @@ def fetch_all_targets(targets):
                     }, f, ensure_ascii=False)
                 
                 saved_files.append(filepath)
-                print(f"  💾 保存完了 (JSON通信 {len(captured_json)}件)")
+                print(f"  💾 生データ保存完了 (通信傍受: {len(captured_json)}件)")
             except Exception as e:
                 print(f"  ❌ 取得エラー (@{username}): {e}")
             finally:
                 context.close()
 
-            # ⭐ ご要望の「任意のランダムな時間間隔」：アカウントごとに5秒〜12秒ランダムで待機
-            sleep_time = random.uniform(5.0, 12.0)
+            # 💡 ボット検知回避のためのランダムウェイト（15秒〜30秒）
+            sleep_time = random.uniform(15.0, 30.0)
             print(f"  ⏳ 待機中... ({sleep_time:.1f}秒)\n")
             time.sleep(sleep_time)
 
