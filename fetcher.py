@@ -20,7 +20,7 @@ def fetch_all_targets(targets):
     sleep_ranges = {
         "threads": (3.0, 6.0),
         "x": (5.0, 10.0),
-        "instagram": (12.0, 22.0)
+        "instagram": (30.0, 60.0)
     }
 
     ig_session_id = os.environ.get("INSTAGRAM_SESSION_ID", "")
