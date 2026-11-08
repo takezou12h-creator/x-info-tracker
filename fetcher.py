@@ -3,6 +3,7 @@ import json
 import time
 import random
 from playwright.sync_api import sync_playwright
+from playwright_stealth import stealth_sync
 
 RAW_DIR = "raw_data"
 
