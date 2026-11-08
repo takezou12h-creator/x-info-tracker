@@ -2,8 +2,8 @@ name: Daily SNS Follower Scraper
 
 on:
   schedule:
-    # 毎日 日本時間の朝 8:00 に実行（UTCの23:00）
-    - cron: '0 23 * * *'
+    # 毎日 日本時間の朝 4:00 に実行（UTCの19:00）
+    - cron: '00 19 * * *'
   workflow_dispatch:
 
 jobs:
