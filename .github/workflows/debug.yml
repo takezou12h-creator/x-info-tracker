@@ -1,0 +1,54 @@
+name: 🛠 Debug Single Account
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: '調査するSNS媒体'
+        required: true
+        default: 'x'
+        type: choice
+        options:
+          - x
+          - instagram
+          - threads
+      username:
+        description: 'アカウントID (例: AIkikue)'
+        required: true
+        type: string
+
+jobs:
+  debug_scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - name: リポジトリのチェックアウト
+        uses: actions/checkout@v4
+
+      - name: Pythonのセットアップ
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: ライブラリのインストール
+        run: |
+          pip install -r requirements.txt
+          playwright install --with-deps chromium
+
+      - name: テスト実行（${{ inputs.platform }} / @${{ inputs.username }}）
+        env:
+          GCP_JSON_KEY: ${{ secrets.GCP_JSON_KEY }}
+          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+          INSTAGRAM_SESSION_ID: ${{ secrets.INSTAGRAM_SESSION_ID }}
+          X_AUTH_TOKEN: ${{ secrets.X_AUTH_TOKEN }}
+          X_CT0: ${{ secrets.X_CT0 }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        # 💡 main.py にSNS名とユーザー名を渡して1件だけ実行する
+        run: python main.py ${{ inputs.platform }} ${{ inputs.username }}
+
+      - name: 取得した生データ(HTML/JSON)を保存（デバッグ用）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-raw-data-${{ inputs.platform }}-${{ inputs.username }}
+          path: raw_data/
+          retention-days: 1
