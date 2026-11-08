@@ -14,21 +14,27 @@ def load_targets(csv_path="targets.csv", target_platform=None):
             platform = parts[0].lower() if len(parts) >= 2 else "x"
             username = parts[1] if len(parts) >= 2 else parts[0]
 
-            # 特定のSNSだけが指定されている場合は、それ以外をスキップ
             if target_platform and platform != target_platform.lower():
                 continue
             targets.append((platform, username))
     return targets
 
 def main():
-    # コマンドライン引数から担当SNSを取得（例: python main.py instagram）
+    # 引数の受け取り (例: python main.py x AIkikue)
     target_platform = sys.argv[1] if len(sys.argv) > 1 else None
-    label = target_platform.upper() if target_platform else "ALL"
+    target_username = sys.argv[2] if len(sys.argv) > 2 else None
 
-    print(f"🚀 [{label}] SNSフォロワー集計を開始します")
-    targets = load_targets(target_platform=target_platform)
+    # 💡 ユーザー名が指定されている場合は「デバッグモード（1件のみ実行）」
+    if target_platform and target_username:
+        print(f"🛠 [DEBUG MODE] 単一アカウントのテスト実行: {target_platform.upper()} / @{target_username}")
+        targets = [(target_platform.lower(), target_username)]
+        label = "DEBUG"
+    else:
+        label = target_platform.upper() if target_platform else "ALL"
+        print(f"🚀 [{label}] SNSフォロワー集計を開始します")
+        targets = load_targets(target_platform=target_platform)
+
     print(f"📋 対象アカウント数: {len(targets)}件\n")
-
     if not targets:
         print("⚠️ 対象のアカウントがありません。")
         return
