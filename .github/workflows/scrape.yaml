@@ -13,7 +13,7 @@ jobs:
     strategy:
       fail-fast: false # どれか1つのSNSがエラーになっても、他のSNSの処理は止めない設定
       matrix:
-        platform: [x] #threads, instagram, x]
+        platform: [threads, instagram, x]
 
     steps:
       - name: リポジトリのチェックアウト
