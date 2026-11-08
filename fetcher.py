@@ -39,23 +39,33 @@ def fetch_all_targets(targets):
             viewport={"width": 1280, "height": 800}
         )
 
-        # --- ログイン用セッション（Cookie）の事前注入 ---
+        # 💡 [対策1] ライブラリ不要の「自前ステルス化」スクリプトを全ページに注入
+        context.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+            window.chrome = { runtime: {} };
+            Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] });
+            Object.defineProperty(navigator, 'languages', { get: () => ['ja-JP', 'ja', 'en-US', 'en'] });
+        """)
+
+        # 💡 [対策2] XのCookieを .x.com と .twitter.com の両方にセット（リダイレクト時の消失対策）
         cookies = []
         if ig_session_id:
             cookies.append({
                 'name': 'sessionid', 'value': ig_session_id,
                 'domain': '.instagram.com', 'path': '/', 'secure': True, 'httpOnly': True
             })
+            
         if x_auth_token:
-            cookies.append({
-                'name': 'auth_token', 'value': x_auth_token,
-                'domain': '.x.com', 'path': '/', 'secure': True, 'httpOnly': True
-            })
-            if x_ct0:
+            for domain in ['.x.com', '.twitter.com']:
                 cookies.append({
-                    'name': 'ct0', 'value': x_ct0,
-                    'domain': '.x.com', 'path': '/', 'secure': True, 'httpOnly': False
+                    'name': 'auth_token', 'value': x_auth_token,
+                    'domain': domain, 'path': '/', 'secure': True, 'httpOnly': True
                 })
+                if x_ct0:
+                    cookies.append({
+                        'name': 'ct0', 'value': x_ct0,
+                        'domain': domain, 'path': '/', 'secure': True, 'httpOnly': False
+                    })
         
         if cookies:
             context.add_cookies(cookies)
