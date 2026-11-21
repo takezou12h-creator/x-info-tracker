@@ -100,16 +100,18 @@ def fetch_all_targets(targets):
                     time.sleep(1.5)  # APIへの礼儀として1.5秒待機
 
     # ---------------------------------------------------------
-    # 2. Instagram / Threads の処理（既存のPlaywright処理を維持）
+    # 2. Instagram / Threads / TikTok の処理（既存のPlaywright処理を維持）
     # ---------------------------------------------------------
     if browser_targets:
         url_templates = {
             "instagram": "https://www.instagram.com/{}/",
-            "threads": "https://www.threads.net/@{}"
+            "threads": "https://www.threads.net/@{}",
+            "tiktok": "https://www.tiktok.com/@{}"
         }
         sleep_ranges = {
             "threads": (3.0, 6.0),
-            "instagram": (15.0, 30.0)
+            "instagram": (15.0, 30.0),
+            "tiktok": (5.0, 10.0)
         }
         ig_session_id = os.environ.get("INSTAGRAM_SESSION_ID", "")
 
