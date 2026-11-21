@@ -12,6 +12,7 @@ on:
           - x
           - instagram
           - threads
+          - tiktok
       username:
         description: 'アカウントID (例: AIkikue)'
         required: true
