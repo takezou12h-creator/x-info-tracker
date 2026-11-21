@@ -88,6 +88,44 @@ def parse_saved_file(filepath):
         if fg_m: metrics["following"] = int(fg_m.group(1))
         if p_m: metrics["posts"] = int(p_m.group(1))
 
+    # ---------------------------------------------------------
+    # 3. TikTok の解析
+    # ---------------------------------------------------------
+    elif platform == "tiktok":
+        html = data.get("html", "")
+        json_str = json.dumps(data.get("json_list", []), ensure_ascii=False)
+        combined = json_str + "\n" + html
+
+        # 埋め込みJSON (__UNIVERSAL_DATA_FOR_REHYDRATION__) から抽出
+        m = re.search(
+            r'<script[^>]*id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>(.*?)</script>',
+            html,
+            re.DOTALL
+        )
+        if m:
+            try:
+                uni_data = json.loads(m.group(1))
+                stats = (
+                    uni_data.get("__DEFAULT_SCOPE__", {})
+                    .get("webapp.user-detail", {})
+                    .get("userInfo", {})
+                    .get("stats", {})
+                )
+                metrics["followers"] = int(stats.get("followerCount") or 0)
+                metrics["following"] = int(stats.get("followingCount") or 0)
+                metrics["posts"] = int(stats.get("videoCount") or 0)
+            except (ValueError, AttributeError, TypeError):
+                pass
+
+        # フォールバック（HTML / 傍受JSON からの正規表現抽出）
+        if metrics["followers"] == 0:
+            f_m = re.search(r'"followerCount"\s*:\s*(\d+)', combined)
+            fg_m = re.search(r'"followingCount"\s*:\s*(\d+)', combined)
+            p_m = re.search(r'"videoCount"\s*:\s*(\d+)', combined)
+            if f_m: metrics["followers"] = int(f_m.group(1))
+            if fg_m: metrics["following"] = int(fg_m.group(1))
+            if p_m: metrics["posts"] = int(p_m.group(1))
+
     return {
         "platform": platform,
         "username": username,
