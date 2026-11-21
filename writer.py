@@ -7,7 +7,8 @@ from google.oauth2.service_account import Credentials
 SHEET_NAMES = {
     "x": "X",
     "instagram": "Instagram",
-    "threads": "Threads"
+    "threads": "Threads",
+    "tiktok": "TikTok"
 }
 
 def get_or_create_worksheet(spreadsheet, sheet_title):
